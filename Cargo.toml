@@ -1,0 +1,13 @@
+[package]
+name = "visual"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+wgpu = "26.0.0"
+image = "0.25"
+winit = { version = "0.30.5", features = ["rwh_06"] }
+bytemuck = { version = "1.16", features = ["derive"] }
+pollster = "0.3"
+wgpu_glyph = { version = "0.26", default-features = false }
+mimalloc = "0.1"
