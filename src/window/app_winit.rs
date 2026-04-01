@@ -1,28 +1,132 @@
-use std::sync::Arc;
-use wgpu::{Instance, RenderPassColorAttachment};
+use std::rc::Rc;
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, mpsc};
+use wgpu::RenderPassColorAttachment;
 use wgpu_glyph::Section;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
-use crate::window::component::base::component_type::SharedDrawable;
+use crate::window::component::base::area::Rect;
+use crate::window::component::base::component_type::{SharedDrawable, SharedDrawableExt};
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
+use crate::window::component::base::hover_manager::HoverManager;
+use crate::window::component::base::settings::Settings;
+use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::button::ButtonManager;
-use crate::window::component::interface::button_manager_control::ButtonManagerControl;
 use crate::window::component::interface::component_control::{ComponentControl, PanelControl};
 use crate::window::component::interface::drawable::{Drawable, InternalAccess};
 use crate::window::component::interface::layout::Layout;
+use crate::window::component::layout::layout_context::LayoutContext;
 use crate::window::component::panel::Panel;
 use crate::window::wgpu::wgpu_state::WgpuState;
 
-#[derive(Default)]
 pub struct AppWinit {
     window: Option<Arc<Window>>,
     state: Option<WgpuState>,
     panel: Panel,
     button_manager: ButtonManager,
     cursor_position: (u16, u16),
+    hover_manager: HoverManager,
+    commands_rx: Receiver<UiCommand>,
+    commands_tx: Sender<UiCommand>,
+}
+
+impl Default for AppWinit {
+    fn default() -> Self {
+        let mut panel = Panel::default();
+
+        let (tx, rx) = mpsc::channel();
+        let mut settings = Settings::default();
+        settings.command_tx = Some(tx.clone());
+        panel.base.settings = settings;
+        Self {
+            window: Option::default(),
+            state: Option::default(),
+            panel: panel,
+            button_manager: ButtonManager::default(),
+            cursor_position: (u16::default(), u16::default()),
+            hover_manager: HoverManager::default(),
+            commands_tx: tx,
+            commands_rx: rx,
+        }
+    }
+}
+
+impl AppWinit {
+    fn update_layout(&mut self) {
+        if let (Some(window), Some(state)) = (&self.window, &self.state) {
+            let window_size = window.inner_size();
+
+            let fonts = state.glyph_brush.fonts();
+
+            let layout_context = LayoutContext { fonts: fonts };
+
+            self.panel.resize(
+                &Rect::new(0, 0, window_size.width as i16, window_size.height as i16),
+                &layout_context,
+            );
+        }
+    }
+    // pub fn emit(&mut self, cmd: UiCommand) {
+    //     self.command_queue.push(cmd);
+    // }
+    pub fn process_commands(&mut self) {
+        let mut needs_layout = false;
+
+        while let Ok(cmd) = self.commands_rx.try_recv() {
+            self.execute_command(cmd, &mut needs_layout);
+        }
+
+        if needs_layout {
+            self.update_layout(); // Пересчитываем геометрию ОДИН раз для всех изменений
+            if let Some(w) = &self.window {
+                w.request_redraw();
+            }
+        }
+    }
+    fn execute_command(&mut self, cmd: UiCommand, needs_layout: &mut bool) {
+        match cmd {
+            UiCommand::Batch(commands) => {
+                for c in commands {
+                    self.execute_command(c, needs_layout);
+                }
+            }
+            UiCommand::ChangeColor(el, color) => {
+                if let Some(el) = el {
+                    el.call_as_mut::<Panel>(|pn| pn.set_background(color));
+                    *needs_layout = true;
+                }
+            }
+            UiCommand::SetScale(el, scale) => {
+                if let Some(el) = el {
+                    let mut e = el.borrow_mut();
+                    if let Some(ctrl) = e.as_label_control_mut() {
+                        ctrl.set_scale(scale);
+                        *needs_layout = true;
+                    }
+                }
+            }
+            UiCommand::SetText(el, text) => {
+                if let Some(el) = el {
+                    let mut e = el.borrow_mut();
+                    if let Some(ctrl) = e.as_label_control_mut() {
+                        ctrl.set_text(text);
+                        *needs_layout = true;
+                    }
+                }
+            }
+            UiCommand::Custom(action) => {
+                (action)();
+                *needs_layout = true;
+            }
+        }
+    }
+
+    pub fn get_tx(&self) -> Sender<UiCommand> {
+        self.commands_tx.clone()
+    }
 }
 
 impl ApplicationHandler for AppWinit {
@@ -89,24 +193,26 @@ impl ApplicationHandler for AppWinit {
                 // }
                 //
                 if let Some(state) = self.state.as_mut() {
-                    // 1. Обновляем конфиг wgpu (чтобы не было растягивания картинки и утечек)
+                    // Обновляем конфиг wgpu (чтобы не было растягивания картинки и утечек)
                     state.config.width = size.width.max(1);
                     state.config.height = size.height.max(1);
                     state.surface.configure(&state.device, &state.config);
 
                     // Обновляем размеры корневой панели
-                    // (Размеры в UI у вас u16, а winit дает u32)
                     let width = size.width as u16;
                     let height = size.height as u16;
 
                     self.panel.set_width(width);
                     self.panel.set_height(height);
 
-                    // Пересчитываем положение всех дочерних элементов (Layout)
-                    // Создаем Rect на весь экран
-                    let screen_area =
-                        crate::window::component::base::area::Rect::new(0, 0, width, height);
-                    self.panel.resize(&screen_area);
+                    let fonts = state.glyph_brush.fonts();
+
+                    let layout_context = LayoutContext { fonts: fonts };
+
+                    self.panel.resize(
+                        &Rect::new(0, 0, width as i16, height as i16),
+                        &layout_context,
+                    );
 
                     // Обновляем Uniform буфер (размер окна для шейдера)
                     // Это заставит шейдер правильно пересчитать координаты (-1..1)
@@ -144,7 +250,7 @@ impl ApplicationHandler for AppWinit {
                     vertices: Vec::new(),
                     texts: Vec::new(),
                 };
-                self.panel.print(&mut gpu_ctx, &self.panel.base.rect);
+                self.panel.print(&mut gpu_ctx);
 
                 {
                     // Начинаем проход отрисовки (Render Pass)
@@ -189,6 +295,8 @@ impl ApplicationHandler for AppWinit {
                     state.glyph_brush.queue(Section {
                         screen_position: (text_data.x, text_data.y),
                         bounds: (state.config.width as f32, state.config.height as f32),
+                        layout: wgpu_glyph::Layout::default()
+                            .line_breaker(wgpu_glyph::BuiltInLineBreaker::UnicodeLineBreaker),
                         text: vec![
                             wgpu_glyph::Text::new(&text_data.text)
                                 .with_color(text_data.color) // Попробуйте чисто белый для теста
@@ -221,6 +329,8 @@ impl ApplicationHandler for AppWinit {
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_position = (position.x as u16, position.y as u16);
 
+                self.hover_manager
+                    .hover(self.cursor_position.0, self.cursor_position.1);
                 //println!("{} {}", self.cursor_position.0, self.cursor_position.1);
             }
             WindowEvent::MouseInput { state, button, .. } => {
@@ -228,23 +338,33 @@ impl ApplicationHandler for AppWinit {
                     && state == winit::event::ElementState::Pressed
                 {
                     let (mx, my) = self.cursor_position;
-                    if self.button_manager.click(mx as u16, my as u16) {
-                        if let Some(window) = self.window.as_ref() {
-                            window.request_redraw();
-                        }
-                    }
+                    self.button_manager.click(mx as u16, my as u16);
                 }
             }
             _ => (),
         }
+    }
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        self.process_commands();
     }
 }
 
 impl ComponentControl for AppWinit {
     fn add<T: Drawable + 'static>(&mut self, item: T) -> SharedDrawable {
         let shared = self.panel.add(item);
+
+        let weak_self = Rc::downgrade(&shared);
+
+        shared.borrow_mut().as_base_mut().self_ref = Some(weak_self);
+
+        shared
+            .borrow_mut()
+            .set_default_settings(&self.panel.base.settings);
+
         self.panel
             .get_button_manager(&mut self.button_manager, &InternalAccess(()));
+        self.panel
+            .get_hover_manager(&mut self.hover_manager, &InternalAccess(()));
 
         return shared;
     }

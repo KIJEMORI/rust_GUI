@@ -1,15 +1,34 @@
-use std::sync::{OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::mpsc::Sender;
 //use crate::window::component::base::font::Font;
 
-use std::sync::{Arc, Mutex};
+use crate::window::component::base::ui_command::UiCommand;
+use wgpu_glyph::FontId;
 
 pub struct Settings {
-    // Храним только атрибуты (название, стиль), так как сами байты уже в FontSystem
-    pub panel_background_color: u32,
+    pub background_color: u32,
+    pub font_id: FontId,
+    pub command_tx: Option<Sender<UiCommand>>,
 }
 
-static BACKGROUND_COLOR: OnceLock<Mutex<u32>> = OnceLock::new();
+impl Settings {
+    pub fn new(path: Option<String>) -> Self {
+        Settings {
+            background_color: 0xFFFFFFFF,
+            font_id: FontId::default(),
+            command_tx: None,
+        }
+    }
+    pub fn set_font(&mut self, font_id: FontId) {
+        self.font_id = font_id;
+    }
+}
 
-pub fn get_background_color() -> &'static Mutex<u32> {
-    BACKGROUND_COLOR.get_or_init(|| Mutex::new(0xFFFFFFFF))
+impl Default for Settings {
+    fn default() -> Self {
+        Self::new(Some(r"C:\Users\KOCH\Documents\GameEngine\visual\src\window\component\base\Fonts\calibri.ttf".to_string()))
+    }
+}
+
+pub fn get_settings() -> Settings {
+    Settings::new(None)
 }

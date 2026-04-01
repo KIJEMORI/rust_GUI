@@ -148,4 +148,10 @@ where
             self.min.set_height(T::default());
         }
     }
+    pub fn contains(&self, x: T, y: T) -> bool {
+        if x >= self.x1 && x <= self.x2 && y >= self.y1 && y <= self.y2 {
+            return true;
+        }
+        return false;
+    }
 }

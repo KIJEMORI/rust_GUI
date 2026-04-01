@@ -1,4 +1,7 @@
+use std::sync::mpsc::Sender;
+
 use crate::window::component::base::component_type::SharedDrawable;
+use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::interface::component_control::ComponentControl;
 use crate::window::component::interface::drawable::Drawable;
 use crate::window::component::interface::layout::Layout;
@@ -28,9 +31,18 @@ impl App {
             self.app = Some(AppWinit::default());
         }
 
-        let mut event_loop = self.event_loop.take().expect("Event loop already taken");
+        let event_loop = self.event_loop.take().expect("Event loop already taken");
         let app = self.app.as_mut().unwrap();
         let _ = event_loop.run_app(app);
+    }
+
+    pub fn get_tx(&mut self) -> Sender<UiCommand> {
+        if self.app.is_some() {
+            self.app.as_ref().unwrap().get_tx()
+        } else {
+            self.app = Some(AppWinit::default());
+            self.app.as_ref().unwrap().get_tx()
+        }
     }
 }
 

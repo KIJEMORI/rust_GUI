@@ -1,6 +1,8 @@
 mod window;
 
-use crate::window::component::base::component_type::SharedDrawableExt;
+use std::rc::Rc;
+
+use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::button::Button;
 use crate::window::component::interface::component_control::LabelControl;
 use crate::window::component::interface::const_layout::ConstLayout;
@@ -32,28 +34,36 @@ fn main() {
 
     let label1 = panel.add(label1);
 
-    app.add(panel);
-
+    let panel_hov = app.add(panel);
+    {
+        let panel_setting = Rc::clone(&panel_hov);
+        panel_hov
+            .borrow_mut()
+            .set_on_mouse_enter(UiCommand::ChangeColor(
+                Some(panel_setting.clone()),
+                0xFF00FFFF,
+            ));
+        let panel_setting = Rc::clone(&panel_hov);
+        panel_hov
+            .borrow_mut()
+            .set_on_mouse_leave(UiCommand::ChangeColor(
+                Some(panel_setting.clone()),
+                0xFFFFFF00,
+            ));
+    }
     //let mut button = Label::from_str("FFFFFFFFF FFFFFFFFFFFFFFF");
+    let btn_action = UiCommand::Batch(vec![
+        UiCommand::ChangeColor(None, 0xFF00FFFF),
+        UiCommand::SetText(None, "Успешно!".into()),
+    ]);
 
-    let mut button = Button::new("Продолжить игру", move || {
-        label1.call_as::<Label>(|lb| {
-            let color = lb.get_font_color();
-
-            if color == 0xFFFF0000 {
-                lb.set_font_color(0xFF000000);
-            } else {
-                lb.set_font_color(0xFFFF0000);
-            }
-
-            lb.set_scale(52);
-        });
-    });
+    let mut button = Button::new("Продолжить игру", btn_action);
     // button.set_height(40);
     // button.set_width(500);
 
     button.set_background(0xFF00FFFF);
     button.set_font_color(0xFFFF00FF);
+
     // button.set_margin(Direction {
     //     up: 10,
     //     down: 10,
@@ -61,9 +71,8 @@ fn main() {
     //     left: 10,
     // });
 
-    let mut panel = Panel::default();
-
     //button.set_color(0xFF00FF00);
+    let mut panel = Panel::default();
 
     panel.base.id = "LOL2".to_string();
     panel.set_height(40);
@@ -72,7 +81,7 @@ fn main() {
         up: 10,
         down: 10,
         right: 10,
-        left: 10,
+        left: 150,
     });
     panel.set_padding(Direction {
         up: 10,
@@ -82,11 +91,11 @@ fn main() {
     });
     panel.set_background(0xFF000000);
 
-    let mut c = ConstBaseLayout::new();
-
     panel.add(button);
 
-    app.add(panel);
+    let mut c = ConstBaseLayout::new();
+
+    let panel = app.add(panel);
 
     // let mut panel = Panel::default();
     // panel.set_height(40);

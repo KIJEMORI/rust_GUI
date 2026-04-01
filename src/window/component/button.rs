@@ -2,58 +2,53 @@ use std::any::Any;
 
 use crate::add_drawable_control;
 use crate::window::component::base::area::Rect;
-use crate::window::component::base::component_type::{ComponentType, SharedDrawable};
+use crate::window::component::base::base::Base;
+use crate::window::component::base::component_type::SharedDrawable;
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
-use crate::window::component::base::render_context::RenderContext;
-use crate::window::component::interface::button_manager_control::ButtonManagerControl;
+use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::interface::component_control::{LabelControl, PanelControl};
 use crate::window::component::interface::const_layout::ConstLayout;
 use crate::window::component::interface::drawable::Drawable;
 use crate::window::component::label::Label;
 use crate::window::component::layout::const_base_layout::Direction;
+use crate::window::component::layout::layout_context::LayoutContext;
 
 pub struct ButtonManager {
-    buttons: Vec<SharedDrawable>,
+    items: Vec<SharedDrawable>,
 }
 
 impl Default for ButtonManager {
     fn default() -> Self {
-        ButtonManager {
-            buttons: Vec::new(),
-        }
+        ButtonManager { items: Vec::new() }
     }
 }
 
-impl ButtonManagerControl for ButtonManager {
-    fn add(&mut self, button: SharedDrawable) {
-        self.buttons.push(button);
+impl ButtonManager {
+    pub fn add(&mut self, button: SharedDrawable) {
+        self.items.push(button);
     }
-    fn click(&self, x: u16, y: u16) -> bool {
-        for button in self.buttons.iter().rev() {
-            if button.borrow().click(x, y) {
-                return true;
+    pub fn click(&self, mx: u16, my: u16) {
+        for item in self.items.iter().rev() {
+            let is_hover_item = item.borrow().hover(mx, my);
+            if is_hover_item {
+                item.borrow_mut().on_click();
+                break;
             }
         }
-        false
     }
 }
 
 pub struct Button {
     label: Label,
-    on_click: Box<dyn Fn()>, // Храним «команду» внутри
 }
 
+#[allow(dead_code)]
 impl Button {
-    pub fn new<F>(text: &str, action: F) -> Self
-    where
-        F: Fn() + 'static,
-    {
-        let label = Label::new(text.to_string());
+    pub fn new(text: &str, action: UiCommand) -> Self {
+        let mut label = Label::new(text.to_string());
+        label.set_on_click(action);
 
-        Button {
-            label: label,
-            on_click: Box::new(action),
-        }
+        Button { label: label }
     }
 
     pub fn set_height(&mut self, h: u16) {
@@ -62,33 +57,35 @@ impl Button {
     pub fn set_width(&mut self, w: u16) {
         self.label.set_width(w);
     }
+
+    fn fill_self_ref(&self, cmd: &mut UiCommand) {
+        match cmd {
+            UiCommand::Batch(cmds) => {
+                for c in cmds {
+                    self.fill_self_ref(c);
+                }
+            }
+            UiCommand::ChangeColor(target, _)
+            | UiCommand::SetText(target, _)
+            | UiCommand::SetScale(target, _) => {
+                if target.is_none() {
+                    *target = Some(self.label.panel.base.get_shared());
+                }
+            }
+            UiCommand::Custom(..) => (),
+        }
+    }
 }
 
 impl Drawable for Button {
-    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<u16>) {
-        self.label.print(ctx, area);
+    fn print(&self, ctx: &mut GpuRenderContext) {
+        self.label.print(ctx);
     }
-    fn resize(&mut self, area: &Rect<u16>) -> Rect<u16> {
-        self.label.resize(area)
-    }
-    fn get_type(&self) -> ComponentType {
-        ComponentType::Button
-    }
-    fn click(&self, x: u16, y: u16) -> bool {
-        if self.label.panel.click(x, y) {
-            (self.on_click)();
-            return true;
-        }
-        false
-    }
-    add_drawable_control!();
-    fn as_any(&self) -> &dyn Any {
-        self
+    fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext) -> Rect<i16> {
+        self.label.resize(area, ctx)
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
+    add_drawable_control!();
 
     fn set_padding(&mut self, direction: Direction) {
         self.label.set_padding(direction);
@@ -104,6 +101,45 @@ impl Drawable for Button {
     }
     fn get_padding(&self) -> &Direction {
         self.label.get_padding()
+    }
+    fn set_default_settings(&mut self, settings: &super::base::settings::Settings) {
+        self.label.set_default_settings(settings);
+    }
+    fn is_clickable(&mut self) -> bool {
+        self.label.is_clickable()
+    }
+    fn on_click(&self) {
+        self.label.on_click();
+    }
+    fn set_on_click(&mut self, action: UiCommand) {
+        self.label.set_on_click(action);
+    }
+    fn is_hoverable(&mut self) -> bool {
+        self.label.is_hoverable()
+    }
+    fn hover(&self, mx: u16, my: u16) -> bool {
+        self.label.hover(mx, my)
+    }
+    fn set_on_mouse_enter(&mut self, action: UiCommand) {
+        self.label.set_on_mouse_enter(action);
+    }
+    fn set_on_mouse_leave(&mut self, action: UiCommand) {
+        self.label.set_on_mouse_leave(action);
+    }
+    fn on_mouse_enter(&self) {
+        self.label.on_mouse_enter();
+    }
+    fn on_mouse_leave(&self) {
+        self.label.on_mouse_leave();
+    }
+    fn as_label_control_mut(&mut self) -> Option<&mut dyn LabelControl> {
+        Some(self)
+    }
+    fn as_base(&self) -> &Base {
+        self.label.as_base()
+    }
+    fn as_base_mut(&mut self) -> &mut Base {
+        self.label.as_base_mut()
     }
 }
 impl PanelControl for Button {

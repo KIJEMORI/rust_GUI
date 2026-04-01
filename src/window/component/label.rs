@@ -1,23 +1,28 @@
 use std::any::Any;
-use std::cell::RefCell;
+
+use wgpu_glyph::ab_glyph::{Font, FontArc, ScaleFont};
+use wgpu_glyph::{FontId, GlyphPositioner, Layout, SectionGeometry, SectionText};
 
 use crate::add_drawable_control;
 use crate::window::component::base::area::Rect;
 use crate::window::component::base::base::Base;
-use crate::window::component::base::component_type::ComponentType;
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
-use crate::window::component::base::render_context::RenderContext;
+use crate::window::component::base::settings::Settings;
+use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::interface::component_control::{LabelControl, PanelControl};
 use crate::window::component::interface::const_layout::ConstLayout;
 use crate::window::component::interface::drawable::Drawable;
 use crate::window::component::layout::const_base_layout::Direction;
+use crate::window::component::layout::layout_context::LayoutContext;
 use crate::window::component::panel::Panel;
 
 pub struct Label {
     pub text: String,
     pub panel: Panel,
+    max_scale: f32,
     pub scale: f32,
     color: u32,
+    needs_layout: bool,
 }
 
 impl Label {
@@ -25,8 +30,10 @@ impl Label {
         Label {
             text,
             panel: Panel::default(),
+            max_scale: 20.0,
             scale: 20.0,
             color: 0xFF000000,
+            needs_layout: true,
         }
     }
 
@@ -43,36 +50,71 @@ impl Label {
         self.panel.set_width(w);
     }
 
-    // fn update_size(&mut self) {
-    //     let rect = &self.panel.base.rect;
-    //     let max_w = rect.min.get_width() as f32;
-    //     let max_h = rect.min.get_height() as f32;
+    pub fn calculate_intrinsic_size(&self, font: &FontArc, scale: f32) -> (u16, u16) {
+        use wgpu_glyph::ab_glyph::{Font, ScaleFont};
 
-    //     if max_w <= 0.0 || max_h <= 0.0 {
-    //         return;
-    //     }
+        let scaled_font = font.as_scaled(scale);
+        let mut width = 0.0;
+        let mut last_glyph_id = None;
 
-    //     // 1. Бинарный поиск оптимального Scale [14.0 ... max_scale]
-    //     let mut low = 14.0;
-    //     let mut high = self.max_scale.x;
-    //     let mut best_scale = low;
+        for c in self.text.chars() {
+            let glyph_id = scaled_font.glyph_id(c);
+            if let Some(last_id) = last_glyph_id {
+                // Кернинг можно убрать для еще большего ускорения
+                width += scaled_font.kern(last_id, glyph_id);
+            }
+            width += scaled_font.h_advance(glyph_id);
+            last_glyph_id = Some(glyph_id);
+        }
 
-    //     for _ in 0..10 {
-    //         // 10 итераций дают точность ~0.1 для диапазона 100
-    //         let mid = (low + high) / 2.0;
-    //         if self.check_fits(mid, max_w, max_h) {
-    //             best_scale = mid;
-    //             low = mid;
-    //         } else {
-    //             high = mid;
-    //         }
-    //     }
+        let height = scaled_font.ascent() - scaled_font.descent();
+        (width.ceil() as u16, height.ceil() as u16)
+    }
 
-    //     self.scale = Scale::uniform(best_scale);
+    pub fn calculate_wrapped_size(&self, font: &FontArc, scale: f32, max_width: f32) -> (u16, u16) {
+        let layout = Layout::default();
 
-    //     // 2. Финальная генерация глифов с переносами
-    //     self.glyphs = self.layout_with_wrap(self.scale, max_w);
-    // }
+        let text = SectionText {
+            text: &self.text,
+            scale: scale.into(),
+            font_id: FontId(0),
+        };
+
+        let fonts = &[font];
+        let glyphs = layout.calculate_glyphs(
+            fonts,
+            &SectionGeometry {
+                screen_position: (0.0, 0.0),
+                bounds: (max_width, f32::INFINITY),
+            },
+            &[text],
+        );
+
+        let mut min_x = 0.0;
+        let mut max_x = 0.0;
+        let mut min_y = 0.0;
+        let mut max_y = 0.0;
+
+        for glyph in glyphs {
+            let pos = glyph.glyph.position;
+
+            max_x = (max_x as f32).max(pos.x as f32);
+            max_y = (max_y as f32).max(pos.y as f32);
+        }
+
+        let scaled_font = font.as_scaled(scale);
+        let line_height = scaled_font.ascent() - scaled_font.descent();
+
+        (max_x.ceil() as u16, (max_y + line_height).ceil() as u16)
+    }
+
+    fn set_max_size(&mut self, ctx: &LayoutContext) {
+        let font = &ctx.fonts[self.panel.base.settings.font_id.0];
+
+        let (w, h) = self.calculate_intrinsic_size(&font, self.max_scale);
+        self.panel.set_width(w);
+        self.panel.set_height(h);
+    }
 }
 
 impl LabelControl for Label {
@@ -87,7 +129,8 @@ impl LabelControl for Label {
         return self.color;
     }
     fn set_scale(&mut self, scale: u16) {
-        self.scale = scale as f32;
+        self.max_scale = scale as f32;
+        self.needs_layout = true;
     }
     fn set_text(&mut self, text: String) {
         self.text = text;
@@ -98,65 +141,58 @@ impl LabelControl for Label {
 }
 
 impl Drawable for Label {
-    fn print(&self, ctx: &mut GpuRenderContext, _area: &Rect<u16>) {
-        self.panel.print(ctx, _area);
+    fn print(&self, ctx: &mut GpuRenderContext) {
+        self.panel.print(ctx);
 
         let rect = &self.panel.base.rect;
         ctx.push_text(
             &self.text,
             rect.x1 as f32,
-            rect.y2 as f32,
+            rect.y1 as f32,
             self.scale,
             self.color,
         );
-        // let window_width = ctx.window_size.get_width();
-        // let window_height = ctx.window_size.get_height();
-
-        // for glyph in self.glyphs.iter() {
-        //     if let Some(bb) = glyph.pixel_bounding_box() {
-        //         glyph.draw(|gx, gy, v| {
-        //             if v < 0.01 {
-        //                 return;
-        //             }
-        //             // bb.min.x/y уже учитывают позицию каретки
-        //             let x = bb.min.x + gx as i32 + rect.x1 as i32;
-        //             let y = bb.min.y + gy as i32 + rect.y1 as i32;
-
-        //             if x >= 0
-        //                 && x < rect.x2.min(window_width) as i32
-        //                 && y >= 0
-        //                 && y < rect.y2.min(window_height) as i32
-        //             {
-        //                 let index = y as usize * window_width as usize + x as usize;
-        //                 if let Some(pixel) = ctx.buffer.get_mut(index) {
-        //                     *pixel = blend_colors(*pixel, self.color, v);
-        //                 }
-        //             }
-        //         });
-        //     }
-        // }
     }
 
-    fn resize(&mut self, area: &Rect<u16>) -> Rect<u16> {
-        self.panel.resize(area);
+    fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext) -> Rect<i16> {
+        if self.needs_layout {
+            self.set_max_size(ctx);
 
-        return self.panel.base.rect.clone();
-    }
-    fn get_type(&self) -> ComponentType {
-        ComponentType::Label
-    }
-    fn click(&self, x: u16, y: u16) -> bool {
-        self.panel.click(x, y)
+            self.needs_layout = false
+        }
+
+        self.panel.resize(area, ctx);
+
+        let rect = &self.panel.base.rect;
+
+        let target_w = rect.min.get_width() as f32;
+        let target_h = rect.min.get_height() as f32;
+
+        let font = &ctx.fonts[self.panel.base.settings.font_id.0];
+
+        if target_w > 0.0 && target_h > 0.0 {
+            // Считаем размер текста при маленьком базовом масштабе
+            let base_scale = 10.0;
+            let (w_base, h_base) = self.calculate_intrinsic_size(&font, base_scale);
+
+            if w_base > 0 && h_base > 0 {
+                // Вычисляем, во сколько раз нам нужно увеличить масштаб,
+                // чтобы заполнить target_w или target_h
+                let ratio_w = target_w / w_base as f32;
+                let ratio_h = target_h / h_base as f32;
+
+                // Выбираем меньший коэффициент (чтобы влезло и по ширине, и по высоте)
+                let optimal_scale = base_scale * ratio_w.min(ratio_h);
+
+                // Ограничиваем максимальным значением
+                self.scale = optimal_scale.min(self.max_scale);
+            }
+        }
+
+        self.panel.base.rect.clone()
     }
 
     add_drawable_control!();
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
 
     fn set_padding(&mut self, direction: Direction) {
         self.panel.set_padding(direction);
@@ -173,33 +209,93 @@ impl Drawable for Label {
     fn get_padding(&self) -> &Direction {
         self.panel.get_padding()
     }
+    fn set_default_settings(&mut self, settings: &Settings) {
+        self.panel.set_default_settings(settings);
+    }
+    fn is_clickable(&mut self) -> bool {
+        if self.panel.is_clickable() {
+            if let Some(cmd) = &mut self.panel.get_command_click() {
+                cmd.fill_ref(&self.panel.base.get_shared());
+                let action = cmd.clone();
+                self.set_on_click(action);
+            }
+            return true;
+        }
+        false
+    }
+    fn set_on_click(&mut self, action: UiCommand) {
+        self.panel.set_on_click(action);
+    }
+    fn on_click(&self) {
+        self.panel.on_click();
+    }
+    fn is_hoverable(&mut self) -> bool {
+        if self.panel.is_clickable() {
+            if let Some(cmd) = &mut self.panel.get_command_on_mouse_enter() {
+                cmd.fill_ref(&self.panel.base.get_shared());
+                let action = cmd.clone();
+                self.set_on_mouse_enter(action);
+            }
+            if let Some(cmd) = &mut self.panel.get_command_on_mouse_leave() {
+                cmd.fill_ref(&self.panel.base.get_shared());
+                let action = cmd.clone();
+                self.set_on_mouse_leave(action);
+            }
+            return true;
+        }
+        false
+    }
+    fn hover(&self, mx: u16, my: u16) -> bool {
+        self.panel.hover(mx, my)
+    }
+    fn set_on_mouse_enter(&mut self, action: UiCommand) {
+        self.panel.set_on_mouse_enter(action);
+    }
+    fn set_on_mouse_leave(&mut self, action: UiCommand) {
+        self.panel.set_on_mouse_leave(action);
+    }
+    fn on_mouse_enter(&self) {
+        self.panel.on_mouse_enter();
+    }
+    fn on_mouse_leave(&self) {
+        self.panel.on_mouse_leave();
+    }
+    fn as_label_control_mut(&mut self) -> Option<&mut dyn LabelControl> {
+        Some(self)
+    }
+    fn as_base(&self) -> &Base {
+        self.panel.as_base()
+    }
+    fn as_base_mut(&mut self) -> &mut Base {
+        self.panel.as_base_mut()
+    }
 }
 
-#[inline(always)]
-fn blend_colors(bg: u32, fg: u32, alpha: f32) -> u32 {
-    if alpha <= 0.0 {
-        return bg;
-    }
-    if alpha >= 1.0 {
-        return fg;
-    }
+// #[inline(always)]
+// fn blend_colors(bg: u32, fg: u32, alpha: f32) -> u32 {
+//     if alpha <= 0.0 {
+//         return bg;
+//     }
+//     if alpha >= 1.0 {
+//         return fg;
+//     }
 
-    let bg_r = ((bg >> 16) & 0xff) as f32;
-    let bg_g = ((bg >> 8) & 0xff) as f32;
-    let bg_b = (bg & 0xff) as f32;
+//     let bg_r = ((bg >> 16) & 0xff) as f32;
+//     let bg_g = ((bg >> 8) & 0xff) as f32;
+//     let bg_b = (bg & 0xff) as f32;
 
-    let fg_r = ((fg >> 16) & 0xff) as f32;
-    let fg_g = ((fg >> 8) & 0xff) as f32;
-    let fg_b = (fg & 0xff) as f32;
+//     let fg_r = ((fg >> 16) & 0xff) as f32;
+//     let fg_g = ((fg >> 8) & 0xff) as f32;
+//     let fg_b = (fg & 0xff) as f32;
 
-    let inv_alpha = 1.0 - alpha;
+//     let inv_alpha = 1.0 - alpha;
 
-    let r = (fg_r * alpha + bg_r * inv_alpha) as u32;
-    let g = (fg_g * alpha + bg_g * inv_alpha) as u32;
-    let b = (fg_b * alpha + bg_b * inv_alpha) as u32;
+//     let r = (fg_r * alpha + bg_r * inv_alpha) as u32;
+//     let g = (fg_g * alpha + bg_g * inv_alpha) as u32;
+//     let b = (fg_b * alpha + bg_b * inv_alpha) as u32;
 
-    (r << 16) | (g << 8) | b
-}
+//     (r << 16) | (g << 8) | b
+// }
 
 impl PanelControl for Label {
     fn set_background(&mut self, color: u32) {

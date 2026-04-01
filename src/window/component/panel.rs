@@ -4,31 +4,35 @@ use std::rc::Rc;
 
 use crate::window::component::base::area::Rect;
 use crate::window::component::base::base::Base;
-use crate::window::component::base::component_type::{ComponentType, SharedDrawable};
+use crate::window::component::base::component_type::SharedDrawable;
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
-use crate::window::component::base::settings::get_background_color;
+use crate::window::component::base::hover_manager::HoverManager;
+use crate::window::component::base::settings::Settings;
+use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::button::ButtonManager;
-use crate::window::component::interface::button_manager_control::ButtonManagerControl;
 use crate::window::component::interface::component_control::{ComponentControl, PanelControl};
 use crate::window::component::interface::const_layout::ConstLayout;
 use crate::window::component::interface::drawable::{Drawable, InternalAccess};
 use crate::window::component::interface::layout::Layout;
 use crate::window::component::layout::base_layout::BaseLayout;
 use crate::window::component::layout::const_base_layout::Direction;
+use crate::window::component::layout::layout_context::LayoutContext;
 
+#[allow(dead_code)]
 pub struct Panel {
-    background_color: u32,
     childs: Vec<SharedDrawable>,
-    margin: Direction,
-    padding: Direction,
-    const_layout: Option<&'static dyn ConstLayout>,
     pub base: Base,
     layout: Box<dyn Layout>,
+    clickable: bool,
+    hoverable: bool,
+    on_click: Option<UiCommand>,
+    on_mouse_enter: Option<UiCommand>,
+    on_mouse_leave: Option<UiCommand>,
 }
 
 #[allow(dead_code)]
 impl Panel {
-    pub fn set_position(&mut self, x: u16, y: u16) {
+    pub fn set_position(&mut self, x: i16, y: i16) {
         self.base.set_position(x, y);
     }
     pub fn set_height(&mut self, h: u16) {
@@ -37,6 +41,24 @@ impl Panel {
     pub fn set_width(&mut self, w: u16) {
         self.base.set_width(w);
     }
+    pub fn get_command_click(&self) -> Option<UiCommand> {
+        if let Some(cmd) = &self.on_click {
+            return Some(cmd.clone());
+        }
+        None
+    }
+    pub fn get_command_on_mouse_enter(&self) -> Option<UiCommand> {
+        if let Some(cmd) = &self.on_mouse_enter {
+            return Some(cmd.clone());
+        }
+        None
+    }
+    pub fn get_command_on_mouse_leave(&self) -> Option<UiCommand> {
+        if let Some(cmd) = &self.on_mouse_leave {
+            return Some(cmd.clone());
+        }
+        None
+    }
 }
 
 impl Default for Panel {
@@ -44,69 +66,40 @@ impl Default for Panel {
         let base = Base::new("Panel".to_string(), Rect::new(0, 0, 0, 0));
 
         Panel {
-            background_color: *get_background_color().lock().unwrap(),
             childs: Vec::new(),
-            margin: Direction::default(),
-            padding: Direction::default(),
-            const_layout: None,
             base: base,
-            layout: Box::new(BaseLayout {}),
+            layout: BaseLayout::new(),
+            clickable: false,
+            on_click: None,
+            hoverable: false,
+            on_mouse_enter: None,
+            on_mouse_leave: None,
         }
     }
 }
 
 impl Drawable for Panel {
-    fn print(&self, ctx: &mut GpuRenderContext, _area: &Rect<u16>) {
+    fn print(&self, ctx: &mut GpuRenderContext) {
         if self.base.visible {
-            let transient = ((self.background_color >> 24) & 0xff) as f32;
+            let transient = ((self.base.settings.background_color >> 24) & 0xff) as f32;
             if transient > 0.0 {
                 let rect = &self.base.rect;
 
-                ctx.push_rect(rect, self.background_color);
+                ctx.push_rect(rect, self.base.settings.background_color);
             }
 
             for child in self.childs.iter() {
-                child.borrow().print(ctx, &self.base.rect);
+                child.borrow().print(ctx);
             }
         }
     }
 
-    fn resize(&mut self, area: &Rect<u16>) -> Rect<u16> {
+    fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext) -> Rect<i16> {
         // Выделяем прямугольник текущей структуры
-        let rect = &mut self.base.rect;
-        // Ставим начало в координаты прямогульника поданного на вход
-        rect.set_position(
-            area.x1 + self.margin.left as u16,
-            area.y1 + self.margin.up as u16,
-        );
+        let rect = self.layout.calculate(&self.base.rect, area);
+        self.base.rect = rect.clone();
 
-        // Считаем смещение полной области по ширине относительно 0
-        let x_offset = rect.get_x_offset();
-        let parent_x_offset = area.x2;
-
-        // Если смещение больше чем данная область отрисовки уменьшаем размер отрисовки текущей структуры
-        if x_offset > parent_x_offset {
-            rect.change_width_on_coord(parent_x_offset);
-        } else {
-            rect.change_width(rect.max.get_width().min(area.min.get_width()));
-        }
-
-        // Всё то же самое но для высоты
-        let y_offset = rect.get_y_offset();
-        let parent_y_offset = area.y2;
-
-        if y_offset > parent_y_offset {
-            rect.change_height_on_coord(parent_y_offset);
-        } else {
-            rect.change_height(rect.max.get_height().min(area.min.get_height()));
-        }
-
-        let x1 = (rect.x1 as i32 + self.padding.left) as u16;
-        let y1 = (rect.y1 as i32 + self.padding.up) as u16;
-        let x2 = (rect.x2 as i32 - self.padding.right) as u16;
-        let y2 = (rect.y2 as i32 - self.padding.down) as u16;
-
-        let padding_rect = Rect::new_from_coord((x1, y1), (x2, y2));
+        let padding_rect = self.layout.padding_area(&self.base.rect);
         // Список размещений потомков структуры
         let mut layout = Vec::new();
         layout.push(padding_rect);
@@ -119,7 +112,7 @@ impl Drawable for Panel {
             let margin = child.borrow().get_margin().clone();
 
             // Вызываем resize
-            let child_rect = child.borrow_mut().resize(&current_free_zone);
+            let child_rect = child.borrow_mut().resize(&current_free_zone, ctx);
 
             // Рассчитываем, что осталось после размещения ребенка
             let remainder = self.layout.next(&child_rect, &current_free_zone, margin);
@@ -130,17 +123,19 @@ impl Drawable for Panel {
         return self.base.rect.clone();
     }
 
-    fn get_type(&self) -> ComponentType {
-        ComponentType::Panel
+    fn set_on_click(&mut self, action: UiCommand) {
+        self.clickable = true;
+        self.on_click = Some(action)
     }
 
-    fn click(&self, x: u16, y: u16) -> bool {
-        let rect = &self.base.rect;
+    fn on_click(&self) {
+        if let Some(cmd) = &self.on_click {
+            let command_to_send = cmd.clone();
 
-        if (x >= rect.x1 && x <= rect.x2) && (y >= rect.y1 && y <= rect.y2) {
-            return true;
+            if let Some(tx) = &self.base.settings.command_tx {
+                let _ = tx.send(command_to_send);
+            }
         }
-        false
     }
 
     fn get_button_manager<'a>(
@@ -149,11 +144,10 @@ impl Drawable for Panel {
         token: &InternalAccess,
     ) {
         for child in self.childs.iter() {
-            if child.borrow().get_type() == ComponentType::Button {
+            if child.borrow_mut().is_clickable() {
                 button_manager.add(Rc::clone(&child));
-            } else {
-                child.borrow().get_button_manager(button_manager, token);
             }
+            child.borrow().get_button_manager(button_manager, token);
         }
     }
 
@@ -166,24 +160,94 @@ impl Drawable for Panel {
     }
 
     fn set_padding(&mut self, direction: Direction) {
-        self.padding = direction;
+        self.layout.set_padding(direction);
     }
     fn set_margin(&mut self, direction: Direction) {
-        self.margin = direction;
+        self.layout.set_margin(direction);
     }
     fn set_const_layout(&mut self, const_layout: &dyn ConstLayout) {}
 
     fn get_margin(&self) -> &Direction {
-        &self.margin
+        &self.layout.get_margin()
     }
     fn get_padding(&self) -> &Direction {
-        &self.padding
+        &self.layout.get_padding()
+    }
+    fn set_default_settings(&mut self, settings: &Settings) {
+        if let Some(tx) = &settings.command_tx {
+            self.base.settings.command_tx = Some(tx.clone());
+        }
+        for child in self.childs.iter_mut() {
+            child.borrow_mut().set_default_settings(settings);
+        }
+    }
+    fn is_clickable(&mut self) -> bool {
+        self.clickable
+    }
+    fn is_hoverable(&mut self) -> bool {
+        self.hoverable
+    }
+    fn hover(&self, mx: u16, my: u16) -> bool {
+        let rect = &self.base.rect;
+
+        if (mx >= rect.x1.max(0) as u16 && mx <= rect.x2.max(0) as u16)
+            && (my >= rect.y1.max(0) as u16 && my <= rect.y2.max(0) as u16)
+        {
+            return true;
+        }
+        false
+    }
+    fn get_hover_manager<'a>(&'a self, hover_manager: &mut HoverManager, token: &InternalAccess) {
+        for child in self.childs.iter() {
+            if child.borrow_mut().is_hoverable() {
+                hover_manager.add(Rc::clone(&child));
+            } else {
+                child.borrow().get_hover_manager(hover_manager, token);
+            }
+        }
+    }
+    fn on_mouse_enter(&self) {
+        if let Some(cmd) = &self.on_mouse_enter {
+            let command_to_send = cmd.clone();
+
+            if let Some(tx) = &self.base.settings.command_tx {
+                let _ = tx.send(command_to_send);
+            }
+        }
+    }
+    fn on_mouse_leave(&self) {
+        if let Some(cmd) = &self.on_mouse_leave {
+            let command_to_send = cmd.clone();
+
+            if let Some(tx) = &self.base.settings.command_tx {
+                let _ = tx.send(command_to_send);
+            }
+        }
+    }
+    fn set_on_mouse_enter(&mut self, action: UiCommand) {
+        self.hoverable = true;
+        self.on_mouse_enter = Some(action)
+    }
+    fn set_on_mouse_leave(&mut self, action: UiCommand) {
+        self.hoverable = true;
+        self.on_mouse_leave = Some(action)
+    }
+    fn as_base(&self) -> &Base {
+        &self.base
+    }
+    fn as_base_mut(&mut self) -> &mut Base {
+        &mut self.base
     }
 }
 
 impl ComponentControl for Panel {
     fn add<T: Drawable + 'static>(&mut self, item: T) -> SharedDrawable {
         let shared: SharedDrawable = Rc::new(RefCell::new(item));
+        let weak_self = Rc::downgrade(&shared);
+        shared.borrow_mut().as_base_mut().self_ref = Some(weak_self);
+        shared
+            .borrow_mut()
+            .set_default_settings(&self.base.settings);
         self.childs.push(Rc::clone(&shared));
         return shared;
     }
@@ -210,6 +274,6 @@ impl ComponentControl for Panel {
 
 impl PanelControl for Panel {
     fn set_background(&mut self, color: u32) {
-        self.background_color = color;
+        self.base.settings.background_color = color;
     }
 }

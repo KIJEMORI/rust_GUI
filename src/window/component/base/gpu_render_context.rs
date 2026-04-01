@@ -14,7 +14,7 @@ pub struct TextData {
 }
 
 impl GpuRenderContext {
-    pub fn push_rect(&mut self, rect: &Rect<u16>, color: u32) {
+    pub fn push_rect(&mut self, rect: &Rect<i16>, color: u32) {
         let x1 = rect.x1 as f32;
         let y1 = rect.y1 as f32;
         let x2 = rect.x2 as f32;

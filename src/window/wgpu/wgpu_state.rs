@@ -2,7 +2,7 @@ use wgpu::{
     Device, Queue, Surface as WgpuSurface, SurfaceConfiguration,
     util::{DeviceExt, StagingBelt},
 };
-use wgpu_glyph::{GlyphBrush, GlyphBrushBuilder, Section, Text, ab_glyph};
+use wgpu_glyph::{GlyphBrush, GlyphBrushBuilder, ab_glyph};
 
 use crate::window::wgpu::{screen_uniform::ScreenUniform, vertex::Vertex};
 pub struct WgpuState {
