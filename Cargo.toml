@@ -11,3 +11,5 @@ bytemuck = { version = "1.16", features = ["derive"] }
 pollster = "0.3"
 wgpu_glyph = { version = "0.26", default-features = false }
 mimalloc = "0.1"
+arboard = "3.6.1"
+glyph_brush = "0.7"

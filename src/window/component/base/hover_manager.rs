@@ -17,8 +17,10 @@ impl Default for HoverManager {
 }
 
 impl HoverManager {
-    pub fn add(&mut self, button: SharedDrawable) {
-        self.items.push(button);
+    pub fn add(&mut self, item: SharedDrawable) {
+        if !self.items.iter().any(|x| Rc::ptr_eq(x, &item)) {
+            self.items.push(item);
+        }
     }
     pub fn hover(&mut self, mx: u16, my: u16) {
         let mut hovered_is_none = self.hovered_element.is_none();
@@ -29,7 +31,9 @@ impl HoverManager {
                 if is_still_over {
                     return;
                 } else {
-                    item.borrow_mut().on_mouse_leave();
+                    if let Some(hoverable) = item.borrow_mut().as_hoverable() {
+                        hoverable.on_mouse_leave();
+                    }
                     hovered_is_none = true;
                 }
             }
@@ -40,7 +44,9 @@ impl HoverManager {
                 let is_hover_item = item.borrow().hover(mx, my);
                 if is_hover_item {
                     self.hovered_element = Some(Rc::clone(item));
-                    item.borrow_mut().on_mouse_enter();
+                    if let Some(hoverable) = item.borrow_mut().as_hoverable() {
+                        hoverable.on_mouse_enter();
+                    }
                     break;
                 }
             }

@@ -1,6 +1,7 @@
 pub mod area;
 pub mod base;
 pub mod component_type;
+pub mod edit_label_manager;
 pub mod gpu_render_context;
 pub mod hover_manager;
 pub mod render_context;

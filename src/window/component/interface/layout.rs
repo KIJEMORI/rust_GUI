@@ -1,8 +1,8 @@
 use crate::window::component::{
-    base::area::Rect,
-    interface::const_layout::ConstLayout,
-    layout::const_base_layout::{ConstBaseLayout, Direction},
+    base::area::Rect, interface::const_layout::ConstLayout, layout::const_base_layout::Direction,
 };
+
+#[allow(dead_code)]
 pub trait Layout {
     fn calculate(&self, area: &Rect<i16>, parent_area: &Rect<i16>) -> Rect<i16>;
     fn padding_area(&self, area: &Rect<i16>) -> Rect<i16>;

@@ -179,4 +179,33 @@ where
         }
         return false;
     }
+    pub fn intersection(&self, other: &Self) -> bool {
+        let x1 = if self.x1 > other.x1 {
+            self.x1
+        } else {
+            other.x1
+        };
+        let y1 = if self.y1 > other.y1 {
+            self.y1
+        } else {
+            other.y1
+        };
+        let x2 = if self.x2 < other.x2 {
+            self.x2
+        } else {
+            other.x2
+        };
+        let y2 = if self.y2 < other.y2 {
+            self.y2
+        } else {
+            other.y2
+        };
+
+        // Если прямоугольники не пересекаются
+        if x2 <= x1 || y2 <= y1 {
+            return false;
+        }
+
+        true
+    }
 }

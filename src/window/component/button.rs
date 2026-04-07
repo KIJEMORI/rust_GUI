@@ -1,6 +1,8 @@
 use std::any::Any;
+use std::rc::Rc;
 
 use crate::add_drawable_control;
+use crate::window::component::animation::animation_action::AnimationSequence;
 use crate::window::component::base::area::Rect;
 use crate::window::component::base::base::Base;
 use crate::window::component::base::component_type::SharedDrawable;
@@ -8,7 +10,9 @@ use crate::window::component::base::gpu_render_context::GpuRenderContext;
 use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::interface::component_control::{LabelControl, PanelControl};
 use crate::window::component::interface::const_layout::ConstLayout;
-use crate::window::component::interface::drawable::Drawable;
+use crate::window::component::interface::drawable::{
+    AnimationDrawable, ClickableDrawable, Drawable,
+};
 use crate::window::component::label::Label;
 use crate::window::component::layout::const_base_layout::Direction;
 use crate::window::component::layout::layout_context::LayoutContext;
@@ -24,14 +28,18 @@ impl Default for ButtonManager {
 }
 
 impl ButtonManager {
-    pub fn add(&mut self, button: SharedDrawable) {
-        self.items.push(button);
+    pub fn add(&mut self, item: SharedDrawable) {
+        if !self.items.iter().any(|x| Rc::ptr_eq(x, &item)) {
+            self.items.push(item);
+        }
     }
     pub fn click(&self, mx: u16, my: u16) {
         for item in self.items.iter().rev() {
             let is_hover_item = item.borrow().hover(mx, my);
             if is_hover_item {
-                item.borrow_mut().on_click();
+                if let Some(clickable) = item.borrow_mut().as_clickable() {
+                    clickable.on_click();
+                }
                 break;
             }
         }
@@ -60,8 +68,8 @@ impl Button {
 }
 
 impl Drawable for Button {
-    fn print(&self, ctx: &mut GpuRenderContext) {
-        self.label.print(ctx);
+    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>) {
+        self.label.print(ctx, area);
     }
     fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext) -> Rect<i16> {
         self.label.resize(area, ctx)
@@ -87,35 +95,14 @@ impl Drawable for Button {
     fn set_default_settings(&mut self, settings: &super::base::settings::Settings) {
         self.label.set_default_settings(settings);
     }
-    fn is_clickable(&mut self) -> bool {
-        self.label.is_clickable()
-    }
-    fn on_click(&self) {
-        self.label.on_click();
-    }
-    fn set_on_click(&mut self, action: UiCommand) {
-        self.label.set_on_click(action);
-    }
-    fn is_hoverable(&mut self) -> bool {
-        self.label.is_hoverable()
-    }
     fn hover(&self, mx: u16, my: u16) -> bool {
         self.label.hover(mx, my)
     }
-    fn set_on_mouse_enter(&mut self, action: UiCommand) {
-        self.label.set_on_mouse_enter(action);
-    }
-    fn set_on_mouse_leave(&mut self, action: UiCommand) {
-        self.label.set_on_mouse_leave(action);
-    }
-    fn on_mouse_enter(&self) {
-        self.label.on_mouse_enter();
-    }
-    fn on_mouse_leave(&self) {
-        self.label.on_mouse_leave();
+    fn as_panel_control_mut(&mut self) -> Option<&mut dyn PanelControl> {
+        self.label.as_panel_control_mut()
     }
     fn as_label_control_mut(&mut self) -> Option<&mut dyn LabelControl> {
-        Some(self)
+        self.label.as_label_control_mut()
     }
     fn as_base(&self) -> &Base {
         self.label.as_base()
@@ -123,41 +110,16 @@ impl Drawable for Button {
     fn as_base_mut(&mut self) -> &mut Base {
         self.label.as_base_mut()
     }
-}
-impl PanelControl for Button {
-    fn set_background(&mut self, color: u32) {
-        self.label.set_background(color);
+    fn as_clickable(&mut self) -> Option<&mut dyn super::interface::drawable::ClickableDrawable> {
+        self.label.as_clickable()
     }
-}
-impl LabelControl for Button {
-    fn set_font(&mut self, family_name: &'static str) {
-        self.label.set_font(family_name);
+    fn as_hoverable(&mut self) -> Option<&mut dyn super::interface::drawable::HoverableDrawable> {
+        self.label.as_hoverable()
     }
-    fn get_font_color(&self) -> u32 {
-        self.label.get_font_color()
+    fn as_selectable(&mut self) -> Option<&mut dyn super::interface::drawable::SelectableDrawable> {
+        self.label.as_selectable()
     }
-    fn set_font_color(&mut self, color: u32) {
-        self.label.set_font_color(color);
-    }
-    fn set_text(&mut self, text: String) {
-        self.label.set_text(text);
-    }
-    fn get_text(&self) -> String {
-        self.label.get_text()
-    }
-    fn set_text_str(&mut self, text: &str) {
-        self.label.set_text_str(&text);
-    }
-    fn set_scale(&mut self, scale: u16) {
-        self.label.set_scale(scale);
-    }
-    fn remove_select(&mut self) {
-        self.label.remove_select();
-    }
-    fn set_start_caret(&mut self, select_start: (u16, u16), ctx: &LayoutContext) {
-        self.label.set_start_caret(select_start, ctx);
-    }
-    fn set_end_caret(&mut self, select_end: (u16, u16), ctx: &LayoutContext) {
-        self.label.set_end_caret(select_end, ctx);
+    fn as_with_animation(&mut self) -> Option<&mut dyn AnimationDrawable> {
+        self.label.as_with_animation()
     }
 }

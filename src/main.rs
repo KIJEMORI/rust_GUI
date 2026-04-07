@@ -1,12 +1,18 @@
 mod window;
 
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
+use crate::window::component::animation::animation_action::{AnimationSequence, AnimationStep};
+use crate::window::component::base::component_type::SharedDrawable;
 use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::button::Button;
+use crate::window::component::edit_label::EditLabel;
 use crate::window::component::interface::component_control::LabelControl;
 use crate::window::component::interface::const_layout::ConstLayout;
-use crate::window::component::interface::drawable::Drawable;
+use crate::window::component::interface::drawable::{
+    AnimationDrawable, ClickableDrawable, Drawable,
+};
 use crate::window::component::label::Label;
 use crate::window::component::layout::const_base_layout::{ConstBaseLayout, Direction};
 use crate::window::component::layout::row_layout::RowLayout;
@@ -22,12 +28,16 @@ fn main() {
 
     let mut panel = Panel::default();
 
-    let mut label1 = Label::from_str("Новая игра");
+    let mut label1 = EditLabel::new("Новая игра");
 
-    label1.set_background(0xFF000000);
-    label1.set_font_color(0xFF00FF00);
-    let label_command = UiCommand::EditLabel(None);
-    label1.set_on_click(label_command);
+    label1
+        .as_panel_control_mut()
+        .unwrap()
+        .set_background(0xFF000000);
+    label1
+        .as_label_control_mut()
+        .unwrap()
+        .set_font_color(0xFF00FF00);
 
     panel.base.id = "LOL".to_string();
     panel.set_height(40);
@@ -39,24 +49,24 @@ fn main() {
     c.set_relative_height(50);
     panel.set_const_layout(Some(Box::new(c)));
 
-    let label1 = panel.add(label1);
+    panel.add(label1);
 
     let panel_hov = app.add(panel);
     {
         let panel_setting = Rc::clone(&panel_hov);
-        panel_hov
-            .borrow_mut()
-            .set_on_mouse_enter(UiCommand::ChangeColor(
+        if let Some(hovearable) = panel_hov.borrow_mut().as_hoverable() {
+            hovearable.set_on_mouse_enter(UiCommand::ChangeColor(
                 Some(panel_setting.clone()),
                 0xFF00FFFF,
             ));
-        let panel_setting = Rc::clone(&panel_hov);
-        panel_hov
-            .borrow_mut()
-            .set_on_mouse_leave(UiCommand::ChangeColor(
+        }
+
+        if let Some(hovearable) = panel_hov.borrow_mut().as_hoverable() {
+            hovearable.set_on_mouse_leave(UiCommand::ChangeColor(
                 Some(panel_setting.clone()),
                 0xFFFFFF00,
             ));
+        }
     }
     //let mut button = Label::from_str("FFFFFFFFF FFFFFFFFFFFFFFF");
     let btn_action = UiCommand::Batch(vec![
@@ -68,8 +78,11 @@ fn main() {
     // button.set_height(40);
     // button.set_width(500);
 
-    button.set_background(0xFF00FFFF);
-    button.set_font_color(0xFFFF00FF);
+    button.as_base_mut().settings.background_color = 0xFF00FFFF;
+    button
+        .as_label_control_mut()
+        .unwrap()
+        .set_font_color(0xFFFF00FF);
 
     // button.set_margin(Direction {
     //     up: 10,
@@ -118,9 +131,6 @@ fn main() {
     label2.set_background(0xFFFF0000);
 
     app.add(label2);
-
-    //app.add(panel);
-    //
 
     let mut panel = Panel::default();
 

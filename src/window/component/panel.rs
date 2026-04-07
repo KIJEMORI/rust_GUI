@@ -1,7 +1,8 @@
-use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::add_drawable_control;
+use crate::window::component::animation::animation_action::AnimationSequence;
 use crate::window::component::base::area::Rect;
 use crate::window::component::base::base::Base;
 use crate::window::component::base::component_type::SharedDrawable;
@@ -13,7 +14,9 @@ use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::button::ButtonManager;
 use crate::window::component::interface::component_control::{ComponentControl, PanelControl};
 use crate::window::component::interface::const_layout::ConstLayout;
-use crate::window::component::interface::drawable::{Drawable, InternalAccess};
+use crate::window::component::interface::drawable::{
+    AnimationDrawable, ClickableDrawable, Drawable, HoverableDrawable, InternalAccess,
+};
 use crate::window::component::interface::layout::Layout;
 use crate::window::component::layout::base_layout::BaseLayout;
 use crate::window::component::layout::const_base_layout::Direction;
@@ -24,11 +27,10 @@ pub struct Panel {
     childs: Vec<SharedDrawable>,
     pub base: Base,
     layout: Box<dyn Layout>,
-    clickable: bool,
-    hoverable: bool,
     on_click: Option<UiCommand>,
     on_mouse_enter: Option<UiCommand>,
     on_mouse_leave: Option<UiCommand>,
+    animation: Vec<AnimationSequence>,
 }
 
 #[allow(dead_code)]
@@ -70,53 +72,174 @@ impl Default for Panel {
             childs: Vec::new(),
             base: base,
             layout: BaseLayout::new(),
-            clickable: false,
             on_click: None,
-            hoverable: false,
             on_mouse_enter: None,
             on_mouse_leave: None,
+            animation: Vec::new(),
+        }
+    }
+}
+
+impl ClickableDrawable for Panel {
+    fn is_clickable(&self) -> bool {
+        self.on_click.is_some()
+    }
+
+    fn set_on_click(&mut self, action: UiCommand) {
+        self.on_click = Some(action)
+    }
+
+    fn on_click(&self) {
+        if let Some(cmd) = &self.on_click {
+            let mut command_to_send = cmd.clone();
+
+            command_to_send.fill_ref(&self.base.get_shared());
+
+            if let Some(tx) = &self.base.settings.command_tx {
+                let _ = tx.send(command_to_send);
+            }
+        }
+    }
+}
+
+impl HoverableDrawable for Panel {
+    fn is_hoverable(&self) -> bool {
+        self.on_mouse_enter.is_some() || self.on_mouse_leave.is_some()
+    }
+    fn on_mouse_enter(&self) {
+        if let Some(cmd) = &self.on_mouse_enter {
+            let mut command_to_send = cmd.clone();
+
+            command_to_send.fill_ref(&self.base.get_shared());
+
+            if let Some(tx) = &self.base.settings.command_tx {
+                let _ = tx.send(command_to_send);
+            }
+        }
+    }
+    fn on_mouse_leave(&self) {
+        if let Some(cmd) = &self.on_mouse_leave {
+            let mut command_to_send = cmd.clone();
+
+            command_to_send.fill_ref(&self.base.get_shared());
+
+            if let Some(tx) = &self.base.settings.command_tx {
+                let _ = tx.send(command_to_send);
+            }
+        }
+    }
+    fn set_on_mouse_enter(&mut self, action: UiCommand) {
+        self.on_mouse_enter = Some(action)
+    }
+    fn set_on_mouse_leave(&mut self, action: UiCommand) {
+        self.on_mouse_leave = Some(action)
+    }
+}
+
+impl AnimationDrawable for Panel {
+    fn have_animation(&self) -> bool {
+        !self.animation.is_empty()
+    }
+    fn set_animation(&mut self, animation: Vec<AnimationSequence>) {
+        self.animation = animation
+    }
+    fn add_animation(&mut self, animation: AnimationSequence) {
+        self.animation.push(animation)
+    }
+    fn add_animation_batch(&mut self, animations: Vec<AnimationSequence>) {
+        self.animation.extend(animations);
+    }
+    fn start_animation(&mut self) {
+        self.fill_ref();
+        if self.base.run_base_animation && self.base.run_loop_animation {
+            return;
+        }
+        if !self.animation.is_empty() {
+            self.base.run_base_animation = true;
+            self.base.run_loop_animation = true;
+            let mut command_to_send = UiCommand::StartAnimation(None);
+            command_to_send.fill_ref(&self.base.get_shared());
+
+            if let Some(tx) = &self.base.settings.command_tx {
+                let _ = tx.send(command_to_send);
+            }
+        }
+    }
+    fn get_animations(&self) -> &[AnimationSequence] {
+        &self.animation
+    }
+    fn stop_animations(&mut self) {
+        self.base.run_base_animation = false;
+    }
+    fn stop_loop_animation(&mut self) {
+        self.base.run_loop_animation = false;
+    }
+    fn restart_animations(&mut self) {
+        self.stop_animations();
+        self.stop_loop_animation();
+
+        self.start_animation();
+    }
+    fn need_animate(&self) -> bool {
+        self.base.run_base_animation
+    }
+    fn need_animate_loop(&self) -> bool {
+        self.base.run_loop_animation
+    }
+
+    fn fill_ref(&mut self) {
+        for anim in &mut self.animation {
+            for steps in &mut anim.steps {
+                steps.action.fill_ref(&self.base.get_shared());
+            }
         }
     }
 }
 
 impl Drawable for Panel {
-    fn print(&self, ctx: &mut GpuRenderContext) {
-        if self.base.visible {
+    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>) {
+        if self.base.visible && self.base.visible_on_this_frame {
             let transient = ((self.base.settings.background_color >> 24) & 0xff) as f32;
             if transient > 0.0 {
                 let rect = &self.base.rect;
 
-                ctx.push_rect(rect, self.base.settings.background_color);
+                ctx.push_rect(rect, Some(area), self.base.settings.background_color);
             }
 
             for child in self.childs.iter() {
-                child.borrow().print(ctx);
+                child.borrow().print(ctx, &self.base.rect);
             }
         }
     }
 
     fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext) -> Rect<i16> {
-        // Выделяем прямугольник текущей структуры
         let rect = self.layout.calculate(&self.base.rect, area);
-        self.base.rect = rect.clone();
+        if rect.intersection(area) {
+            self.base.visible_on_this_frame = true;
 
-        let padding_rect = self.layout.padding_area(&self.base.rect);
-        // Список размещений потомков структуры
-        let mut layout = padding_rect;
-        for child in self.childs.iter_mut() {
-            // Берем текущую свободную область
-            let current_free_zone = layout.clone();
+            self.base.rect = rect.clone();
 
-            // Получаем маржин ребенка
-            let margin = child.borrow().get_margin().clone();
+            let padding_rect = self.layout.padding_area(&self.base.rect);
 
-            // Вызываем resize
-            let child_rect = child.borrow_mut().resize(&current_free_zone, ctx);
+            let mut layout = padding_rect;
+            for child in self.childs.iter_mut() {
+                let current_free_zone = layout.clone();
 
-            // Рассчитываем, что осталось после размещения ребенка
-            let remainder = self.layout.next(&child_rect, &current_free_zone, margin);
+                // Получаем маржин ребенка
+                let margin = child.borrow().get_margin().clone();
 
-            layout = remainder;
+                // Вызываем resize
+                let child_rect = child.borrow_mut().resize(&current_free_zone, ctx);
+
+                let remainder = self.layout.next(&child_rect, &current_free_zone, margin);
+
+                layout = remainder;
+            }
+        } else {
+            self.base.visible_on_this_frame = false;
+            for child in self.childs.iter_mut() {
+                child.borrow_mut().as_base_mut().visible_on_this_frame = false;
+            }
         }
 
         return self.base.rect.clone();
@@ -129,14 +252,20 @@ impl Drawable for Panel {
         token: &InternalAccess,
     ) {
         for child in self.childs.iter() {
-            if child.borrow_mut().is_clickable() {
-                button_manager.add(Rc::clone(&child));
+            if let Some(clickable) = child.borrow_mut().as_clickable() {
+                if clickable.is_clickable() {
+                    button_manager.add(Rc::clone(&child));
+                }
             }
-            if child.borrow_mut().is_hoverable() {
-                hover_manager.add(Rc::clone(&child));
+            if let Some(hoverable) = child.borrow_mut().as_hoverable() {
+                if hoverable.is_hoverable() {
+                    hover_manager.add(Rc::clone(&child));
+                }
             }
-            if child.borrow().is_selectable() {
-                select_manager.add(Rc::clone(&child));
+            if let Some(selectable) = child.borrow_mut().as_selectable() {
+                if selectable.is_selectable() {
+                    select_manager.add(Rc::clone(&child));
+                }
             }
             child
                 .borrow()
@@ -144,41 +273,7 @@ impl Drawable for Panel {
         }
     }
 
-    fn set_on_click(&mut self, action: UiCommand) {
-        self.clickable = true;
-        self.on_click = Some(action)
-    }
-
-    fn on_click(&self) {
-        if let Some(cmd) = &self.on_click {
-            let command_to_send = cmd.clone();
-
-            if let Some(tx) = &self.base.settings.command_tx {
-                let _ = tx.send(command_to_send);
-            }
-        }
-    }
-
-    // fn get_button_manager<'a>(
-    //     &'a self,
-    //     button_manager: &mut ButtonManager,
-    //     token: &InternalAccess,
-    // ) {
-    //     for child in self.childs.iter() {
-    //         if child.borrow_mut().is_clickable() {
-    //             button_manager.add(Rc::clone(&child));
-    //         }
-    //         child.borrow().get_button_manager(button_manager, token);
-    //     }
-    // }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
+    add_drawable_control!();
 
     fn set_padding(&mut self, direction: Direction) {
         self.layout.set_padding(direction);
@@ -204,12 +299,7 @@ impl Drawable for Panel {
             child.borrow_mut().set_default_settings(settings);
         }
     }
-    fn is_clickable(&mut self) -> bool {
-        self.clickable
-    }
-    fn is_hoverable(&mut self) -> bool {
-        self.hoverable
-    }
+
     fn hover(&self, mx: u16, my: u16) -> bool {
         let rect = &self.base.rect;
 
@@ -220,46 +310,25 @@ impl Drawable for Panel {
         }
         false
     }
-    // fn get_hover_manager<'a>(&'a self, hover_manager: &mut HoverManager, token: &InternalAccess) {
-    //     for child in self.childs.iter() {
-    //         if child.borrow_mut().is_hoverable() {
-    //             hover_manager.add(Rc::clone(&child));
-    //         } else {
-    //             child.borrow().get_hover_manager(hover_manager, token);
-    //         }
-    //     }
-    // }
-    fn on_mouse_enter(&self) {
-        if let Some(cmd) = &self.on_mouse_enter {
-            let command_to_send = cmd.clone();
 
-            if let Some(tx) = &self.base.settings.command_tx {
-                let _ = tx.send(command_to_send);
-            }
-        }
-    }
-    fn on_mouse_leave(&self) {
-        if let Some(cmd) = &self.on_mouse_leave {
-            let command_to_send = cmd.clone();
-
-            if let Some(tx) = &self.base.settings.command_tx {
-                let _ = tx.send(command_to_send);
-            }
-        }
-    }
-    fn set_on_mouse_enter(&mut self, action: UiCommand) {
-        self.hoverable = true;
-        self.on_mouse_enter = Some(action)
-    }
-    fn set_on_mouse_leave(&mut self, action: UiCommand) {
-        self.hoverable = true;
-        self.on_mouse_leave = Some(action)
-    }
     fn as_base(&self) -> &Base {
         &self.base
     }
     fn as_base_mut(&mut self) -> &mut Base {
         &mut self.base
+    }
+    fn as_panel_control_mut(&mut self) -> Option<&mut dyn PanelControl> {
+        Some(self)
+    }
+
+    fn as_clickable(&mut self) -> Option<&mut dyn ClickableDrawable> {
+        Some(self)
+    }
+    fn as_hoverable(&mut self) -> Option<&mut dyn HoverableDrawable> {
+        Some(self)
+    }
+    fn as_with_animation(&mut self) -> Option<&mut dyn AnimationDrawable> {
+        Some(self)
     }
 }
 

@@ -14,8 +14,13 @@ pub struct Base {
     pub visible: bool,
     pub settings: Settings,
     pub self_ref: Option<Weak<RefCell<dyn Drawable>>>,
+    pub run_loop_animation: bool,
+    pub run_base_animation: bool,
+    pub visible_on_this_frame: bool,
+    pub offset: (f32, f32),
 }
 
+#[allow(dead_code)]
 impl Base {
     pub fn new(id: String, rect: Rect<i16>) -> Base {
         Base {
@@ -24,6 +29,10 @@ impl Base {
             visible: true,
             settings: get_settings(),
             self_ref: None,
+            run_loop_animation: false,
+            run_base_animation: false,
+            visible_on_this_frame: false,
+            offset: (0.0, 0.0),
         }
     }
 
@@ -52,4 +61,17 @@ impl Base {
                 .and_then(|w| w.upgrade())
                 .expect("Ошибка: Попытка использовать self_ref до того, как компонент был добавлен в систему (app.add)")
     }
+
+    pub fn set_offset(&mut self, x: f32, y: f32) {
+        self.offset = (x, y);
+    }
+    pub fn change_offset_x(&mut self, x: f32) {
+        self.offset.0 += x;
+    }
+    pub fn change_offset_y(&mut self, y: f32) {
+        self.offset.1 += y;
+    }
+    // pub fn handle(&mut self) {
+    //     self.last_interaction = Instant::now();
+    // }
 }

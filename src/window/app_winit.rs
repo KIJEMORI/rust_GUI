@@ -1,16 +1,22 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
+use std::time::{Duration, Instant};
 use wgpu::RenderPassColorAttachment;
-use wgpu_glyph::Section;
+
+use wgpu_glyph::{GlyphCruncher, Text};
 use winit::application::ApplicationHandler;
 use winit::event::{KeyEvent, WindowEvent};
-use winit::event_loop::ActiveEventLoop;
-use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
+use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId};
 
+use crate::window::component::animation::animation_manager::AnimationManager;
 use crate::window::component::base::area::Rect;
 use crate::window::component::base::component_type::{SharedDrawable, SharedDrawableExt};
+use crate::window::component::base::edit_label_manager::EditLabelManager;
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
 use crate::window::component::base::hover_manager::HoverManager;
 use crate::window::component::base::select_manager::SelectManager;
@@ -22,6 +28,8 @@ use crate::window::component::interface::drawable::{Drawable, InternalAccess};
 use crate::window::component::interface::layout::Layout;
 use crate::window::component::layout::layout_context::LayoutContext;
 use crate::window::component::panel::Panel;
+use crate::window::wgpu::draw_args::DrawIndirectArgs;
+use crate::window::wgpu::text_vertex::{TextVertex, push_glyph_to_vertices_raw};
 use crate::window::wgpu::wgpu_state::WgpuState;
 
 pub struct AppWinit {
@@ -32,9 +40,13 @@ pub struct AppWinit {
     button_manager: ButtonManager,
     hover_manager: HoverManager,
     select_manager: SelectManager,
-    edit_label: Option<SharedDrawable>,
+    edit_label_manager: EditLabelManager,
+    animation_manager: AnimationManager,
     commands_rx: Receiver<UiCommand>,
     commands_tx: Sender<UiCommand>,
+    next_redraw: Option<Instant>,
+    gpu_ctx: GpuRenderContext,
+    last_render: Instant,
 }
 
 impl Default for AppWinit {
@@ -53,9 +65,17 @@ impl Default for AppWinit {
             cursor_position: (u16::default(), u16::default()),
             hover_manager: HoverManager::default(),
             select_manager: SelectManager::default(),
-            edit_label: None,
+            edit_label_manager: EditLabelManager::default(),
+            animation_manager: AnimationManager::default(),
             commands_tx: tx,
             commands_rx: rx,
+            next_redraw: None,
+            gpu_ctx: GpuRenderContext {
+                vertices: Vec::with_capacity(1024),
+                texts: Vec::with_capacity(100),
+                text_storage: String::with_capacity(4096),
+            },
+            last_render: Instant::now(),
         }
     }
 }
@@ -75,9 +95,6 @@ impl AppWinit {
             );
         }
     }
-    // pub fn emit(&mut self, cmd: UiCommand) {
-    //     self.command_queue.push(cmd);
-    // }
     pub fn process_commands(&mut self) {
         let mut needs_layout = false;
 
@@ -123,12 +140,80 @@ impl AppWinit {
                     }
                 }
             }
-            UiCommand::EditLabel(el) => self.edit_label = el,
-            UiCommand::RequestRedraw() => *needs_layout = true,
-            UiCommand::Custom(action) => {
-                (action)();
-                *needs_layout = true;
+            UiCommand::EditLabel(el) => {
+                if let Some(el) = el {
+                    self.edit_label_manager.set_edit_label(el);
+                    *needs_layout = true;
+                }
             }
+            UiCommand::RequestRedraw() => *needs_layout = true,
+            UiCommand::RequestRedrawWithTimer(time) => {
+                let scheduled = std::time::Instant::now() + time;
+                self.next_redraw = Some(match self.next_redraw {
+                    Some(current) => current.min(scheduled),
+                    None => scheduled,
+                });
+            }
+            UiCommand::SetOnClick(el, command) => {
+                if let Some(el) = el {
+                    let cmd = *command;
+                    if let Some(clickable) = el.borrow_mut().as_clickable() {
+                        clickable.set_on_click(cmd);
+                    }
+                    self.button_manager.add(Rc::clone(&el));
+                }
+            }
+            UiCommand::SetOnMouseEnter(el, command) => {
+                if let Some(el) = el {
+                    let cmd = *command;
+                    if let Some(hovearable) = el.borrow_mut().as_hoverable() {
+                        hovearable.set_on_mouse_enter(cmd);
+                    }
+                    self.hover_manager.add(Rc::clone(&el));
+                }
+            }
+            UiCommand::SetOnMouseLeave(el, command) => {
+                if let Some(el) = el {
+                    let cmd = *command;
+                    if let Some(hovearable) = el.borrow_mut().as_hoverable() {
+                        hovearable.set_on_mouse_leave(cmd);
+                    }
+                    self.hover_manager.add(Rc::clone(&el));
+                }
+            }
+            UiCommand::SetAnimation(el, animation) => {
+                if let Some(el) = el {
+                    if let Some(with_animation) = el.borrow_mut().as_with_animation() {
+                        with_animation.set_animation((*animation).clone());
+                    }
+                }
+            }
+            UiCommand::AddAnimation(el, animation) => {
+                if let Some(el) = el {
+                    if let Some(with_animation) = el.borrow_mut().as_with_animation() {
+                        with_animation.add_animation((*animation).clone());
+                    }
+                }
+            }
+            UiCommand::AddAnimationBatch(el, animations) => {
+                if let Some(el) = el {
+                    if let Some(with_animation) = el.borrow_mut().as_with_animation() {
+                        with_animation.add_animation_batch((*animations).clone());
+                    }
+                }
+            }
+            UiCommand::StartAnimation(el) => {
+                if let Some(el) = el {
+                    self.animation_manager.start(Rc::clone(&el));
+                }
+            }
+            UiCommand::Custom(el, action) => {
+                if let Some(el) = el {
+                    (action)(el);
+                    *needs_layout = true;
+                }
+            }
+            _ => (),
         }
     }
 
@@ -139,41 +224,7 @@ impl AppWinit {
     fn handle_key(&mut self, event: KeyEvent) {
         let mut needs_layout = false;
 
-        if let Some(el) = self.edit_label.as_ref() {
-            let mut e = el.borrow_mut();
-            if let Some(label) = e.as_label_control_mut() {
-                let mut text = label.get_text();
-
-                if event.state.is_pressed() {
-                    match event.logical_key {
-                        Key::Named(NamedKey::Backspace) => {
-                            text.pop();
-                            needs_layout = true;
-                        }
-                        Key::Named(NamedKey::Escape) => {
-                            drop(e);
-                            self.edit_label = None;
-                            return;
-                        }
-                        Key::Named(NamedKey::Enter) => {
-                            drop(e);
-                            self.edit_label = None;
-                            return;
-                        }
-
-                        _ => {
-                            if let Some(txt) = event.text {
-                                if !txt.chars().any(|c| c.is_control()) {
-                                    text.push_str(txt.as_str());
-                                    needs_layout = true;
-                                }
-                            }
-                        }
-                    }
-                    label.set_text(text);
-                }
-            }
-        }
+        self.edit_label_manager.handle_key(event, &mut needs_layout);
 
         if needs_layout {
             self.update_layout();
@@ -182,7 +233,6 @@ impl AppWinit {
             }
         }
     }
-    fn handle_select(&mut self) {}
 }
 
 impl ApplicationHandler for AppWinit {
@@ -191,7 +241,7 @@ impl ApplicationHandler for AppWinit {
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN, // Или DX12, проверь что ест меньше
+            backends: wgpu::Backends::VULKAN, // Или DX12
             flags: wgpu::InstanceFlags::empty(),
             ..Default::default()
         });
@@ -206,9 +256,26 @@ impl ApplicationHandler for AppWinit {
         }))
         .expect("Не удалось найти видеокарту");
 
+        let mut required_features = wgpu::Features::empty();
+        if adapter
+            .features()
+            .contains(wgpu::Features::MULTI_DRAW_INDIRECT)
+        {
+            required_features |= wgpu::Features::MULTI_DRAW_INDIRECT;
+            println!("MultiDrawIndirect — on");
+        } else {
+            println!("MultiDrawIndirect — off");
+        }
+
         // Создаем логическое устройство и очередь команд
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("My Device"),
+            required_features,
+            required_limits: wgpu::Limits::default(),
+            memory_hints: wgpu::MemoryHints::default(),
+            ..Default::default()
+        }))
+        .expect("Не удалось создать устройство wgpu");
 
         // Конфигурация поверхности под размер окна
         let size = window.inner_size();
@@ -227,27 +294,6 @@ impl ApplicationHandler for AppWinit {
                 event_loop.exit();
             }
             WindowEvent::Resized(size) => {
-                // if let (Some(surface), Some(_)) = (self.surface.as_mut(), self.window.as_ref()) {
-                //     if let (Some(w), Some(h)) =
-                //         (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
-                //     {
-                //         surface.resize(w, h).unwrap();
-
-                //         if let Some(window) = self.window.as_ref() {
-                //             let size = window.inner_size();
-
-                //             self.panel.set_height(size.height as u16);
-                //             self.panel.set_width(size.width as u16);
-
-                //             let area = Rect::new(0, 0, size.width as u16, size.height as u16);
-
-                //             self.panel.resize(&area);
-
-                //             self.window.as_ref().unwrap().request_redraw();
-                //         }
-                //     }
-                // }
-                //
                 if let Some(state) = self.state.as_mut() {
                     // Обновляем конфиг wgpu (чтобы не было растягивания картинки и утечек)
                     state.config.width = size.width.max(1);
@@ -270,8 +316,6 @@ impl ApplicationHandler for AppWinit {
                         &layout_context,
                     );
 
-                    // Обновляем Uniform буфер (размер окна для шейдера)
-                    // Это заставит шейдер правильно пересчитать координаты (-1..1)
                     let screen_uniform = [size.width as f32, size.height as f32, 0.0, 0.0]; // +padding
                     state.queue.write_buffer(
                         &state.uniform_buffer,
@@ -279,14 +323,22 @@ impl ApplicationHandler for AppWinit {
                         bytemuck::cast_slice(&screen_uniform),
                     );
 
-                    // Просим окно перерисоваться
                     if let Some(window) = self.window.as_ref() {
                         window.request_redraw();
                     }
                 }
             }
             WindowEvent::RedrawRequested => {
+                let now = Instant::now();
+
+                if now.duration_since(self.last_render).as_millis() < 8 {
+                    return;
+                }
+                self.last_render = now;
+
                 let state = self.state.as_mut().unwrap();
+
+                self.gpu_ctx.clear();
 
                 // Получаем текущий кадр из видеопамяти
                 let output = state.surface.get_current_texture().unwrap();
@@ -302,11 +354,7 @@ impl ApplicationHandler for AppWinit {
                             label: Some("Main Render Encoder"),
                         });
 
-                let mut gpu_ctx = GpuRenderContext {
-                    vertices: Vec::new(),
-                    texts: Vec::new(),
-                };
-                self.panel.print(&mut gpu_ctx);
+                self.panel.print(&mut self.gpu_ctx, &self.panel.base.rect);
 
                 {
                     // Начинаем проход отрисовки (Render Pass)
@@ -328,59 +376,190 @@ impl ApplicationHandler for AppWinit {
                         ..Default::default()
                     });
 
-                    render_pass.set_pipeline(&state.panel_pipeline);
-                    render_pass.set_bind_group(0, &state.bind_group, &[]);
-
-                    if !gpu_ctx.vertices.is_empty() {
-                        // Создаем буфер точно под текущее количество вершин
-
+                    if !self.gpu_ctx.vertices.is_empty() {
                         state.queue.write_buffer(
                             &state.vertex_buffer,
                             0,
-                            bytemuck::cast_slice(&gpu_ctx.vertices),
+                            bytemuck::cast_slice(&self.gpu_ctx.vertices),
                         );
 
+                        render_pass.set_pipeline(&state.panel_pipeline);
+                        render_pass.set_bind_group(0, &state.bind_group, &[]);
                         render_pass.set_vertex_buffer(0, state.vertex_buffer.slice(..));
 
-                        render_pass.draw(0..gpu_ctx.vertices.len() as u32, 0..1);
-                        gpu_ctx.vertices.clear()
+                        render_pass.draw(0..self.gpu_ctx.vertices.len() as u32, 0..1);
+                    }
+
+                    if !self.gpu_ctx.texts.is_empty() {
+                        if state.last_defrag_time.elapsed() > Duration::from_secs(10) {
+                            if state.defragment_if_needed() {
+                                state.last_defrag_time = Instant::now();
+                            }
+                        }
+
+                        let texts_count = self.gpu_ctx.texts.len();
+
+                        if state.section_offsets.len() < texts_count {
+                            state.section_offsets.resize(texts_count, 0..0);
+                            state.section_hashes.resize(texts_count, 0);
+                            state.section_capacities.resize(texts_count, 0);
+                        }
+                        for (idx, data) in self.gpu_ctx.texts.iter().enumerate() {
+                            let content = &self.gpu_ctx.text_storage[data.range.clone()];
+
+                            let mut hasher = DefaultHasher::new();
+                            content.hash(&mut hasher); // Текст
+                            data.x.to_bits().hash(&mut hasher); // Позиция X
+                            data.y.to_bits().hash(&mut hasher); // Позиция Y
+                            data.size.to_bits().hash(&mut hasher); // Масштаб
+                            // Хешируем clip [f32; 4]
+                            for val in data.clip {
+                                val.to_bits().hash(&mut hasher);
+                            }
+
+                            let current_hash = hasher.finish();
+
+                            if state.section_hashes[idx] != current_hash {
+                                state.section_hashes[idx] = current_hash; // Запоминаем новый хеш
+                            }
+
+                            let extra = TextVertex {
+                                position: [0.0, 0.0],
+                                uv: [0.0, 0.0],
+                                color: data.color, // Передаем цвет сюда
+                                clip: data.clip,   // И клип сюда
+                                section_id: idx as u32,
+                            };
+                            let text_fragment = Text::<TextVertex>::new(content)
+                                .with_scale(data.size)
+                                .with_extra(extra);
+
+                            let section = glyph_brush::Section {
+                                screen_position: (data.x, data.y),
+                                bounds: (f32::INFINITY, f32::INFINITY),
+                                layout: glyph_brush::Layout::default(),
+                                text: vec![text_fragment],
+                            };
+
+                            state.glyph_brush.queue(section);
+                        }
+
+                        // АРЕНА: временное хранилище для пересчитанных строк (только грязных)
+                        let mut dirty_section = Vec::new();
+
+                        let ref_dirty_sections = RefCell::new(&mut dirty_section);
+
+                        let action = state
+                            .glyph_brush
+                            .process_queued(
+                                |rect, data| {
+                                    state.queue.write_texture(
+                                        wgpu::TexelCopyTextureInfo {
+                                            texture: &state.glyph_texture,
+                                            mip_level: 0,
+                                            origin: wgpu::Origin3d {
+                                                x: rect.min[0],
+                                                y: rect.min[1],
+                                                z: 0,
+                                            },
+                                            aspect: wgpu::TextureAspect::All,
+                                        },
+                                        data,
+                                        wgpu::TexelCopyBufferLayout {
+                                            offset: 0,
+                                            bytes_per_row: Some(rect.width()),
+                                            rows_per_image: Some(rect.height()),
+                                        },
+                                        wgpu::Extent3d {
+                                            width: rect.width(),
+                                            height: rect.height(),
+                                            depth_or_array_layers: 1,
+                                        },
+                                    );
+                                },
+                                |glyph| {
+                                    let s_idx = glyph.extra.section_id as usize;
+
+                                    // Генерируем 6 вершин (треугольники)
+                                    let vertices = push_glyph_to_vertices_raw(
+                                        glyph.pixel_coords,
+                                        glyph.tex_coords,
+                                        glyph.extra.clip,
+                                        glyph.extra.color,
+                                        glyph.extra.section_id,
+                                    );
+                                    let extra = glyph.extra.clone();
+                                    ref_dirty_sections
+                                        .borrow_mut()
+                                        .push((s_idx, Vec::from(vertices)));
+
+                                    extra
+                                },
+                            )
+                            .expect("Ошибка обработки очереди текста");
+
+                        match action {
+                            glyph_brush::BrushAction::Draw(_) => {
+                                let mut section_map: HashMap<usize, Vec<TextVertex>> =
+                                    HashMap::new();
+                                for (id, verts) in dirty_section {
+                                    section_map.entry(id).or_default().extend_from_slice(&verts);
+                                }
+
+                                for (s_idx, new_verts) in section_map {
+                                    state.update_section_direct_gpu(s_idx, new_verts);
+                                }
+
+                                state.update_indirect_buffer();
+                            }
+                            glyph_brush::BrushAction::ReDraw => {
+                                if state.active_commands_count as usize
+                                    != state.section_offsets.len()
+                                {
+                                    state.update_indirect_buffer();
+                                }
+                            }
+                        }
+
+                        if state.active_commands_count > 0 {
+                            render_pass.set_pipeline(&state.text_pipeline);
+                            render_pass.set_bind_group(0, &state.bind_group, &[]); // Uniforms
+                            render_pass.set_bind_group(1, &state.text_bind_group, &[]); // Атлас + Самплер
+                            render_pass.set_vertex_buffer(0, state.text_vertex_buffer.slice(..));
+
+                            if state
+                                .device
+                                .features()
+                                .contains(wgpu::Features::MULTI_DRAW_INDIRECT)
+                            {
+                                render_pass.multi_draw_indirect(
+                                    &state.indirect_buffer,
+                                    0,
+                                    state.active_commands_count,
+                                );
+                            } else {
+                                let stride = std::mem::size_of::<DrawIndirectArgs>() as u64;
+                                for i in 0..state.active_commands_count {
+                                    render_pass
+                                        .draw_indirect(&state.indirect_buffer, i as u64 * stride);
+                                }
+                            }
+                        }
                     }
                 }
 
-                for text_data in &gpu_ctx.texts {
-                    state.glyph_brush.queue(Section {
-                        screen_position: (text_data.x, text_data.y),
-                        bounds: (state.config.width as f32, state.config.height as f32),
-                        layout: wgpu_glyph::Layout::default()
-                            .line_breaker(wgpu_glyph::BuiltInLineBreaker::UnicodeLineBreaker),
-                        text: vec![
-                            wgpu_glyph::Text::new(&text_data.text)
-                                .with_color(text_data.color) // Попробуйте чисто белый для теста
-                                .with_scale(text_data.size),
-                        ],
-                        ..Section::default()
-                    });
-                }
-
-                if !gpu_ctx.texts.is_empty() {
-                    state
-                        .glyph_brush
-                        .draw_queued(
-                            &state.device,
-                            &mut state.staging_belt, // Рекомендуется использовать пояс для скорости
-                            &mut encoder,
-                            &view,
-                            state.config.width,
-                            state.config.height,
-                        )
-                        .unwrap();
-                }
-
                 // Отправляем записанные команды на выполнение в видеокарту
-                state.staging_belt.finish();
                 state.queue.submit(std::iter::once(encoder.finish()));
-                state.staging_belt.recall();
                 output.present();
+
+                self.gpu_ctx.clear();
+
+                // Если надо включить постоянный режим отрисовки
+                // if self.edit_label_manager.is_editing() {
+                //     self.next_redraw = Some(Instant::now() + Duration::from_millis(500));
+                // } else {
+                //     self.next_redraw = None;
+                // }
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_position = (position.x as u16, position.y as u16);
@@ -398,14 +577,13 @@ impl ApplicationHandler for AppWinit {
                         &layout_context,
                     );
                 }
-                //println!("{} {}", self.cursor_position.0, self.cursor_position.1);
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if button == winit::event::MouseButton::Left
                     && state == winit::event::ElementState::Pressed
                 {
                     let (mx, my) = self.cursor_position;
-                    self.edit_label = None;
+                    self.edit_label_manager.stop_edit();
 
                     self.button_manager.click(mx as u16, my as u16);
 
@@ -425,18 +603,41 @@ impl ApplicationHandler for AppWinit {
                     self.select_manager.stop_select();
                 }
             }
-            WindowEvent::KeyboardInput {
-                device_id,
-                event,
-                is_synthetic,
-            } => {
+            WindowEvent::KeyboardInput { event, .. } => {
                 self.handle_key(event);
             }
             _ => (),
         }
     }
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.animation_manager.update(&self.commands_tx);
+
         self.process_commands();
+
+        let next_event = self.animation_manager.query_next_timeout();
+
+        match (next_event, self.next_redraw) {
+            (Some(anim_time), Some(redraw_time)) => {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(anim_time.min(redraw_time)));
+            }
+            (Some(time), None) | (None, Some(time)) => {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(time));
+            }
+            (None, None) => {
+                event_loop.set_control_flow(ControlFlow::Wait);
+            }
+        }
+
+        if let Some(state) = self.state.as_mut() {
+            if state.last_defrag_time.elapsed() > Duration::from_secs(10) {
+                if state.defragment_if_needed() {
+                    state.last_defrag_time = Instant::now();
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -458,10 +659,6 @@ impl ComponentControl for AppWinit {
             &mut self.select_manager,
             &InternalAccess(()),
         );
-        // self.panel
-        //     .get_button_manager(&mut self.button_manager, &InternalAccess(()));
-        // self.panel
-        //     .get_hover_manager(&mut self.hover_manager, &InternalAccess(()));
 
         return shared;
     }

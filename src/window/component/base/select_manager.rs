@@ -19,8 +19,10 @@ impl Default for SelectManager {
     }
 }
 impl SelectManager {
-    pub fn add(&mut self, button: SharedDrawable) {
-        self.items.push(button);
+    pub fn add(&mut self, item: SharedDrawable) {
+        if !self.items.iter().any(|x| Rc::ptr_eq(x, &item)) {
+            self.items.push(item);
+        }
     }
     pub fn select_start(&mut self, mx: u16, my: u16, ctx: &LayoutContext) {
         let mut hovered_is_none = self.selected_element.is_none();

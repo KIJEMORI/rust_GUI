@@ -1,7 +1,9 @@
 use std::any::Any;
+use std::time::Instant;
 
 use wgpu_glyph::ab_glyph::{Font, FontArc, PxScaleFont, ScaleFont};
 use wgpu_glyph::{FontId, GlyphPositioner, Layout, SectionGeometry, SectionText};
+use winit::keyboard::SmolStr;
 
 use crate::add_drawable_control;
 use crate::window::component::base::area::Rect;
@@ -9,9 +11,13 @@ use crate::window::component::base::base::Base;
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
 use crate::window::component::base::settings::Settings;
 use crate::window::component::base::ui_command::UiCommand;
-use crate::window::component::interface::component_control::{LabelControl, PanelControl};
+use crate::window::component::interface::component_control::{
+    EditLabelControl, FullEditControl, LabelControl, PanelControl,
+};
 use crate::window::component::interface::const_layout::ConstLayout;
-use crate::window::component::interface::drawable::Drawable;
+use crate::window::component::interface::drawable::{
+    AnimationDrawable, ClickableDrawable, Drawable, HoverableDrawable, SelectableDrawable,
+};
 use crate::window::component::layout::const_base_layout::Direction;
 use crate::window::component::layout::layout_context::LayoutContext;
 use crate::window::component::panel::Panel;
@@ -23,8 +29,13 @@ pub struct Label {
     pub scale: f32,
     color: u32,
     needs_layout: bool,
-    select_index_start: usize,
-    select_index_end: usize,
+    cursor_need: bool,
+    cursor: Rect<i16>,
+    cursor_index: u32,
+    pub cursor_color: u32,
+    cursor_byte_idx: u32,
+    select_index_start: u32,
+    select_index_end: u32,
     select_color: u32,
     select_rect: Rect<i16>,
 }
@@ -38,6 +49,11 @@ impl Label {
             scale: 20.0,
             color: 0xFF000000,
             needs_layout: true,
+            cursor_need: false,
+            cursor: Rect::default(),
+            cursor_index: 0,
+            cursor_color: 0xFFFFFF00,
+            cursor_byte_idx: 0,
             select_index_start: 0,
             select_index_end: 0,
             select_color: 0xAAFFFFFF,
@@ -123,7 +139,7 @@ impl Label {
         self.panel.set_width(w);
         self.panel.set_height(h);
     }
-    fn get_index(&self, target_x: f32, scaled_font: PxScaleFont<&FontArc>) -> usize {
+    fn get_index(&self, target_x: f32, scaled_font: PxScaleFont<&FontArc>) -> u32 {
         let rect = &self.panel.base.rect;
         let mut current_x = 0.0;
         let mut last_glyph_id = None;
@@ -137,14 +153,23 @@ impl Label {
             let advance = scaled_font.h_advance(glyph_id);
 
             if local_x < current_x + advance / 2.0 {
-                return i;
+                return i as u32;
             }
             current_x += advance;
             last_glyph_id = Some(glyph_id);
         }
-        self.text.chars().count() // Если кликнули правее всего текста
+        self.text.chars().count() as u32
+    }
+    fn char_to_byte_idx(&self, char_idx: u32) -> u32 {
+        self.text
+            .char_indices()
+            .map(|(i, _)| i)
+            .nth(char_idx as usize)
+            .unwrap_or(self.text.len()) as u32
     }
 }
+
+impl FullEditControl for Label {}
 
 impl LabelControl for Label {
     fn set_font(&mut self, family_name: &'static str) {}
@@ -164,8 +189,8 @@ impl LabelControl for Label {
     fn set_text(&mut self, text: String) {
         self.text = text;
     }
-    fn get_text(&self) -> String {
-        self.text.clone()
+    fn get_text(&self) -> &str {
+        &self.text
     }
     fn set_text_str(&mut self, text: &str) {
         self.text = text.to_string();
@@ -184,7 +209,8 @@ impl LabelControl for Label {
         let font = &ctx.fonts[self.panel.base.settings.font_id.0];
         let scaled_font = font.as_scaled(self.scale);
 
-        self.select_index_start = self.get_index(select_start.0 as f32, scaled_font)
+        self.select_index_start = self.get_index(select_start.0 as f32, scaled_font);
+        self.select_index_end = self.select_index_start;
     }
     fn set_end_caret(&mut self, select_end: (u16, u16), ctx: &LayoutContext) {
         let font = &ctx.fonts[self.panel.base.settings.font_id.0];
@@ -204,14 +230,150 @@ impl LabelControl for Label {
     }
 }
 
+impl EditLabelControl for Label {
+    fn set_cursor(&mut self) {
+        self.cursor_need = true;
+
+        self.cursor_index = self.select_index_end;
+        self.cursor_byte_idx = self.get_byte_offset(self.cursor_index) as u32;
+    }
+    fn on_cursor(&mut self) {
+        self.cursor_need = true;
+    }
+    fn delete_cursor(&mut self) {
+        self.cursor_need = false;
+    }
+    fn move_cursor_right(&mut self, right: bool) {
+        if right {
+            self.cursor_index = (self.text.chars().count() as u32).min(self.cursor_index + 1);
+            self.select_index_end = self.cursor_index;
+            self.select_index_start = self.cursor_index;
+        } else if self.cursor_index > 0 {
+            self.cursor_index -= 1;
+            self.select_index_end = self.cursor_index;
+            self.select_index_start = self.cursor_index;
+        }
+    }
+
+    fn add_text(&mut self, text: &SmolStr) {
+        let byte_idx = self.cursor_byte_idx;
+
+        if self.select_index_start != self.select_index_end {
+            self.delete_selection();
+            self.text.insert_str(self.cursor_byte_idx as usize, text);
+        } else {
+            self.text.insert_str(byte_idx as usize, text);
+        }
+
+        self.cursor_index += text.chars().count() as u32;
+        self.cursor_byte_idx += text.len() as u32;
+
+        self.sync_indexes();
+    }
+    fn backspace(&mut self) {
+        if self.select_index_start != self.select_index_end {
+            self.delete_selection();
+        } else if self.cursor_index > 0 {
+            self.cursor_index -= 1;
+            let byte_idx = self.get_byte_offset(self.cursor_index);
+            self.text.remove(byte_idx); // Удаляет один char по байтовому смещению
+        }
+        self.sync_indexes();
+    }
+    fn delete_selection(&mut self) {
+        if self.select_index_start == self.select_index_end {
+            return;
+        }
+
+        let start_char = self.select_index_start.min(self.select_index_end);
+        let end_char = self.select_index_start.max(self.select_index_end);
+
+        // Находим байтовые границы
+        let byte_start = self.char_to_byte_idx(start_char) as usize;
+        let byte_end = self.char_to_byte_idx(end_char) as usize;
+
+        // Удаляем диапазон байт напрямую из строки (без создания Vec<char>)
+        self.text.drain(byte_start..byte_end);
+
+        // Устанавливаем курсор в начало удаленного фрагмента
+        self.cursor_index = start_char;
+        self.sync_indexes();
+    }
+
+    fn delete(&mut self) {
+        if self.select_index_start != self.select_index_end {
+            self.delete_selection();
+        } else {
+            let len = self.text.chars().count() as u32;
+            if self.cursor_index < len {
+                let byte_idx = self.get_byte_offset(self.cursor_index);
+                self.text.remove(byte_idx);
+                self.sync_indexes();
+            }
+        }
+    }
+
+    fn sync_indexes(&mut self) {
+        self.select_index_start = self.cursor_index;
+        self.select_index_end = self.cursor_index;
+        self.cursor_byte_idx = self.get_byte_offset(self.cursor_index) as u32;
+        self.on_cursor();
+    }
+
+    fn get_byte_offset(&self, char_idx: u32) -> usize {
+        self.text
+            .char_indices()
+            .map(|(i, _)| i)
+            .nth(char_idx as usize)
+            .unwrap_or(self.text.len())
+    }
+}
+
+impl ClickableDrawable for Label {
+    fn is_clickable(&self) -> bool {
+        self.panel.is_clickable()
+    }
+    fn set_on_click(&mut self, action: UiCommand) {
+        self.panel.set_on_click(action);
+    }
+    fn on_click(&self) {
+        self.panel.on_click();
+    }
+}
+
+impl HoverableDrawable for Label {
+    fn is_hoverable(&self) -> bool {
+        self.panel.is_hoverable()
+    }
+
+    fn set_on_mouse_enter(&mut self, action: UiCommand) {
+        self.panel.set_on_mouse_enter(action);
+    }
+    fn set_on_mouse_leave(&mut self, action: UiCommand) {
+        self.panel.set_on_mouse_leave(action);
+    }
+    fn on_mouse_enter(&self) {
+        self.panel.on_mouse_enter();
+    }
+    fn on_mouse_leave(&self) {
+        self.panel.on_mouse_leave();
+    }
+}
+
+impl SelectableDrawable for Label {
+    fn is_selectable(&self) -> bool {
+        true
+    }
+}
+
 impl Drawable for Label {
-    fn print(&self, ctx: &mut GpuRenderContext) {
-        self.panel.print(ctx);
+    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>) {
+        self.panel.print(ctx, area);
 
         let rect = &self.panel.base.rect;
 
         if self.select_index_start != self.select_index_end {
-            ctx.push_rect(&self.select_rect, self.select_color);
+            ctx.push_rect(&self.select_rect, Some(rect), self.select_color);
         }
         ctx.push_text(
             &self.text,
@@ -219,7 +381,11 @@ impl Drawable for Label {
             rect.y1 as f32,
             self.scale,
             self.color,
+            Some(rect),
         );
+        if self.cursor_need {
+            ctx.push_rect(&self.cursor, Some(rect), self.cursor_color);
+        }
     }
 
     fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext) -> Rect<i16> {
@@ -233,33 +399,68 @@ impl Drawable for Label {
 
         let rect = &self.panel.base.rect;
 
-        let target_w = rect.min.get_width() as f32;
-        let target_h = rect.min.get_height() as f32;
-
         let font = &ctx.fonts[self.panel.base.settings.font_id.0];
 
+        // let target_w = rect.min.get_width() as f32;
+        // let target_h = rect.min.get_height() as f32;
+
+        // if target_w > 0.0 && target_h > 0.0 {
+        //     // Считаем размер текста при маленьком базовом масштабе
+        //     let base_scale = 10.0;
+        //     let (w_base, h_base) = self.calculate_intrinsic_size(&font, base_scale);
+
+        //     if w_base > 0 && h_base > 0 {
+        //         let ratio_w = target_w / w_base as f32;
+        //         let ratio_h = target_h / h_base as f32;
+
+        //         // Выбираем меньший коэффициент (чтобы влезло и по ширине, и по высоте)
+        //         let optimal_scale = base_scale * ratio_w.min(ratio_h);
+
+        //         self.scale = optimal_scale.min(self.max_scale);
+        //     }
+        // }
+
+        let scaled_font = font.as_scaled(self.scale);
+
+        let mut last_id = None;
+        let mut current_x = 0.0;
+        let mut x_start = 0.0;
+        let mut x_end = 0.0;
+        let mut x_cursor = 0.0;
+
+        for (i, c) in self.text.chars().enumerate() {
+            let idx = i as u32;
+            if idx == self.select_index_start {
+                x_start = current_x;
+            }
+            if idx == self.select_index_end {
+                x_end = current_x;
+            }
+            if idx == self.cursor_index {
+                x_cursor = current_x;
+            }
+
+            let gid = scaled_font.glyph_id(c);
+            if let Some(l) = last_id {
+                current_x += scaled_font.kern(l, gid);
+            }
+            current_x += scaled_font.h_advance(gid);
+            last_id = Some(gid);
+        }
+        let char_count = self.text.chars().count() as u32;
+        if self.select_index_start == char_count {
+            x_start = current_x;
+        }
+        if self.select_index_end == char_count {
+            x_end = current_x;
+        }
+        if self.cursor_index == char_count {
+            x_cursor = current_x;
+        }
+
         if self.select_index_start != self.select_index_end {
-            let scaled_font = font.as_scaled(self.scale);
-
-            let get_x = |index: usize| -> f32 {
-                let mut x = 0.0;
-                let mut last_id = None;
-                for (i, c) in self.text.chars().enumerate() {
-                    if i >= index {
-                        break;
-                    }
-                    let gid = scaled_font.glyph_id(c);
-                    if let Some(l) = last_id {
-                        x += scaled_font.kern(l, gid);
-                    }
-                    x += scaled_font.h_advance(gid);
-                    last_id = Some(gid);
-                }
-                x
-            };
-
-            let x1_offset = get_x(self.select_index_start);
-            let x2_offset = get_x(self.select_index_end);
+            let x1_offset = x_start;
+            let x2_offset = x_end;
 
             let first_point = ((rect.x1 as f32 + x1_offset.min(x2_offset)) as i16, rect.y1);
             let second_point = ((rect.x1 as f32 + x1_offset.max(x2_offset)) as i16, rect.y2);
@@ -267,26 +468,18 @@ impl Drawable for Label {
             self.select_rect = Rect::new_from_coord(first_point, second_point);
         }
 
-        if target_w > 0.0 && target_h > 0.0 {
-            // Считаем размер текста при маленьком базовом масштабе
-            let base_scale = 10.0;
-            let (w_base, h_base) = self.calculate_intrinsic_size(&font, base_scale);
+        if self.cursor_need {
+            let x_offset = x_cursor;
+            let x_pos = (rect.x1 as f32 + x_offset) as i16;
 
-            if w_base > 0 && h_base > 0 {
-                // Вычисляем, во сколько раз нам нужно увеличить масштаб,
-                // чтобы заполнить target_w или target_h
-                let ratio_w = target_w / w_base as f32;
-                let ratio_h = target_h / h_base as f32;
-
-                // Выбираем меньший коэффициент (чтобы влезло и по ширине, и по высоте)
-                let optimal_scale = base_scale * ratio_w.min(ratio_h);
-
-                // Ограничиваем максимальным значением
-                self.scale = optimal_scale.min(self.max_scale);
-            }
+            self.cursor = Rect::new_from_coord((x_pos, rect.y1), (x_pos + 1, rect.y2));
         }
 
         self.panel.base.rect.clone()
+    }
+
+    fn hover(&self, mx: u16, my: u16) -> bool {
+        self.panel.hover(mx, my)
     }
 
     add_drawable_control!();
@@ -309,93 +502,38 @@ impl Drawable for Label {
     fn set_default_settings(&mut self, settings: &Settings) {
         self.panel.set_default_settings(settings);
     }
-    fn is_clickable(&mut self) -> bool {
-        if self.panel.is_clickable() {
-            if let Some(cmd) = &mut self.panel.get_command_click() {
-                cmd.fill_ref(&self.panel.base.get_shared());
-                let action = cmd.clone();
-                self.set_on_click(action);
-            }
-            return true;
-        }
-        false
-    }
-    fn set_on_click(&mut self, action: UiCommand) {
-        self.panel.set_on_click(action);
-    }
-    fn on_click(&self) {
-        self.panel.on_click();
-    }
-    fn is_selectable(&self) -> bool {
-        true
-    }
-    fn is_hoverable(&mut self) -> bool {
-        if self.panel.is_clickable() {
-            if let Some(cmd) = &mut self.panel.get_command_on_mouse_enter() {
-                cmd.fill_ref(&self.panel.base.get_shared());
-                let action = cmd.clone();
-                self.set_on_mouse_enter(action);
-            }
-            if let Some(cmd) = &mut self.panel.get_command_on_mouse_leave() {
-                cmd.fill_ref(&self.panel.base.get_shared());
-                let action = cmd.clone();
-                self.set_on_mouse_leave(action);
-            }
-            return true;
-        }
-        false
-    }
-    fn hover(&self, mx: u16, my: u16) -> bool {
-        self.panel.hover(mx, my)
-    }
-    fn set_on_mouse_enter(&mut self, action: UiCommand) {
-        self.panel.set_on_mouse_enter(action);
-    }
-    fn set_on_mouse_leave(&mut self, action: UiCommand) {
-        self.panel.set_on_mouse_leave(action);
-    }
-    fn on_mouse_enter(&self) {
-        self.panel.on_mouse_enter();
-    }
-    fn on_mouse_leave(&self) {
-        self.panel.on_mouse_leave();
-    }
-    fn as_label_control_mut(&mut self) -> Option<&mut dyn LabelControl> {
-        Some(self)
-    }
+
     fn as_base(&self) -> &Base {
         self.panel.as_base()
     }
     fn as_base_mut(&mut self) -> &mut Base {
         self.panel.as_base_mut()
     }
+
+    fn as_panel_control_mut(&mut self) -> Option<&mut dyn PanelControl> {
+        self.panel.as_panel_control_mut()
+    }
+
+    fn as_label_control_mut(&mut self) -> Option<&mut dyn LabelControl> {
+        Some(self)
+    }
+    fn as_edit_label_control_mut(&mut self) -> Option<&mut dyn FullEditControl> {
+        Some(self)
+    }
+
+    fn as_clickable(&mut self) -> Option<&mut dyn ClickableDrawable> {
+        self.panel.as_clickable()
+    }
+    fn as_hoverable(&mut self) -> Option<&mut dyn HoverableDrawable> {
+        self.panel.as_hoverable()
+    }
+    fn as_selectable(&mut self) -> Option<&mut dyn SelectableDrawable> {
+        Some(self)
+    }
+    fn as_with_animation(&mut self) -> Option<&mut dyn AnimationDrawable> {
+        self.panel.as_with_animation()
+    }
 }
-
-// #[inline(always)]
-// fn blend_colors(bg: u32, fg: u32, alpha: f32) -> u32 {
-//     if alpha <= 0.0 {
-//         return bg;
-//     }
-//     if alpha >= 1.0 {
-//         return fg;
-//     }
-
-//     let bg_r = ((bg >> 16) & 0xff) as f32;
-//     let bg_g = ((bg >> 8) & 0xff) as f32;
-//     let bg_b = (bg & 0xff) as f32;
-
-//     let fg_r = ((fg >> 16) & 0xff) as f32;
-//     let fg_g = ((fg >> 8) & 0xff) as f32;
-//     let fg_b = (fg & 0xff) as f32;
-
-//     let inv_alpha = 1.0 - alpha;
-
-//     let r = (fg_r * alpha + bg_r * inv_alpha) as u32;
-//     let g = (fg_g * alpha + bg_g * inv_alpha) as u32;
-//     let b = (fg_b * alpha + bg_b * inv_alpha) as u32;
-
-//     (r << 16) | (g << 8) | b
-// }
 
 impl PanelControl for Label {
     fn set_background(&mut self, color: u32) {
