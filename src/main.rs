@@ -26,11 +26,18 @@ fn main() {
 
     label1.set_background(0xFF000000);
     label1.set_font_color(0xFF00FF00);
+    let label_command = UiCommand::EditLabel(None);
+    label1.set_on_click(label_command);
 
     panel.base.id = "LOL".to_string();
     panel.set_height(40);
     panel.set_width(400);
     panel.set_background(0xFF0000FF);
+
+    let mut c = ConstBaseLayout::new();
+    c.set_relative_width(100);
+    c.set_relative_height(50);
+    panel.set_const_layout(Some(Box::new(c)));
 
     let label1 = panel.add(label1);
 
@@ -81,7 +88,7 @@ fn main() {
         up: 10,
         down: 10,
         right: 10,
-        left: 150,
+        left: 10,
     });
     panel.set_padding(Direction {
         up: 10,
@@ -91,11 +98,14 @@ fn main() {
     });
     panel.set_background(0xFF000000);
 
+    let mut c = ConstBaseLayout::new();
+    c.set_relative_width(100);
+    c.set_relative_height(50);
+    panel.set_const_layout(Some(Box::new(c)));
+
     panel.add(button);
 
-    let mut c = ConstBaseLayout::new();
-
-    let panel = app.add(panel);
+    app.add(panel);
 
     // let mut panel = Panel::default();
     // panel.set_height(40);

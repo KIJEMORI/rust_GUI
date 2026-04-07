@@ -1,4 +1,8 @@
-use crate::window::component::{base::area::Rect, layout::const_base_layout::Direction};
+use crate::window::component::{
+    base::area::Rect,
+    interface::const_layout::ConstLayout,
+    layout::const_base_layout::{ConstBaseLayout, Direction},
+};
 pub trait Layout {
     fn calculate(&self, area: &Rect<i16>, parent_area: &Rect<i16>) -> Rect<i16>;
     fn padding_area(&self, area: &Rect<i16>) -> Rect<i16>;
@@ -7,4 +11,5 @@ pub trait Layout {
     fn set_margin(&mut self, direction: Direction);
     fn get_padding(&self) -> &Direction;
     fn get_margin(&self) -> &Direction;
+    fn set_const_layout(&mut self, const_layout: Option<Box<dyn ConstLayout>>);
 }

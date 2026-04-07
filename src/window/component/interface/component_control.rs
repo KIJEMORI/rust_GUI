@@ -1,6 +1,7 @@
 use crate::window::component::{
     base::component_type::SharedDrawable,
     interface::{drawable::Drawable, layout::Layout},
+    layout::layout_context::LayoutContext,
 };
 
 #[allow(dead_code)]
@@ -25,8 +26,12 @@ pub trait LabelControl {
     fn set_font_color(&mut self, color: u32);
     fn get_font_color(&self) -> u32;
     fn set_text(&mut self, text: String);
+    fn get_text(&self) -> String;
 
     fn set_text_str(&mut self, text: &str);
 
     fn set_scale(&mut self, scale: u16);
+    fn set_start_caret(&mut self, select_start: (u16, u16), ctx: &LayoutContext);
+    fn set_end_caret(&mut self, select_end: (u16, u16), ctx: &LayoutContext);
+    fn remove_select(&mut self);
 }

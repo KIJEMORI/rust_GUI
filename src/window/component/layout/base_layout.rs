@@ -38,6 +38,9 @@ impl Layout for BaseLayout {
     fn get_padding(&self) -> &Direction {
         &self.padding
     }
+    fn set_const_layout(&mut self, const_layout: Option<Box<dyn ConstLayout>>) {
+        self.const_layout = const_layout
+    }
     fn calculate(&self, area: &Rect<i16>, parent_area: &Rect<i16>) -> Rect<i16> {
         let mut area = area.clone();
 
@@ -45,6 +48,20 @@ impl Layout for BaseLayout {
             parent_area.x1 + self.margin.left,
             parent_area.y1 + self.margin.up,
         );
+
+        if let Some(const_layout) = &self.const_layout {
+            let width = const_layout.as_ref().get_width(
+                area.max.get_width() as u16,
+                parent_area.min.get_width() as u16,
+            );
+            area.set_width(width as i16);
+
+            let height = const_layout.as_ref().get_height(
+                area.max.get_height() as u16,
+                parent_area.min.get_height() as u16,
+            );
+            area.set_height(height as i16);
+        }
 
         let x_offset = area.get_x_offset() + self.margin.right;
         let parent_x_offset = parent_area.x2;

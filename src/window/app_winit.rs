@@ -4,14 +4,16 @@ use std::sync::{Arc, mpsc};
 use wgpu::RenderPassColorAttachment;
 use wgpu_glyph::Section;
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{KeyEvent, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
+use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 use crate::window::component::base::area::Rect;
 use crate::window::component::base::component_type::{SharedDrawable, SharedDrawableExt};
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
 use crate::window::component::base::hover_manager::HoverManager;
+use crate::window::component::base::select_manager::SelectManager;
 use crate::window::component::base::settings::Settings;
 use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::button::ButtonManager;
@@ -26,9 +28,11 @@ pub struct AppWinit {
     window: Option<Arc<Window>>,
     state: Option<WgpuState>,
     panel: Panel,
-    button_manager: ButtonManager,
     cursor_position: (u16, u16),
+    button_manager: ButtonManager,
     hover_manager: HoverManager,
+    select_manager: SelectManager,
+    edit_label: Option<SharedDrawable>,
     commands_rx: Receiver<UiCommand>,
     commands_tx: Sender<UiCommand>,
 }
@@ -48,6 +52,8 @@ impl Default for AppWinit {
             button_manager: ButtonManager::default(),
             cursor_position: (u16::default(), u16::default()),
             hover_manager: HoverManager::default(),
+            select_manager: SelectManager::default(),
+            edit_label: None,
             commands_tx: tx,
             commands_rx: rx,
         }
@@ -117,6 +123,8 @@ impl AppWinit {
                     }
                 }
             }
+            UiCommand::EditLabel(el) => self.edit_label = el,
+            UiCommand::RequestRedraw() => *needs_layout = true,
             UiCommand::Custom(action) => {
                 (action)();
                 *needs_layout = true;
@@ -127,6 +135,54 @@ impl AppWinit {
     pub fn get_tx(&self) -> Sender<UiCommand> {
         self.commands_tx.clone()
     }
+
+    fn handle_key(&mut self, event: KeyEvent) {
+        let mut needs_layout = false;
+
+        if let Some(el) = self.edit_label.as_ref() {
+            let mut e = el.borrow_mut();
+            if let Some(label) = e.as_label_control_mut() {
+                let mut text = label.get_text();
+
+                if event.state.is_pressed() {
+                    match event.logical_key {
+                        Key::Named(NamedKey::Backspace) => {
+                            text.pop();
+                            needs_layout = true;
+                        }
+                        Key::Named(NamedKey::Escape) => {
+                            drop(e);
+                            self.edit_label = None;
+                            return;
+                        }
+                        Key::Named(NamedKey::Enter) => {
+                            drop(e);
+                            self.edit_label = None;
+                            return;
+                        }
+
+                        _ => {
+                            if let Some(txt) = event.text {
+                                if !txt.chars().any(|c| c.is_control()) {
+                                    text.push_str(txt.as_str());
+                                    needs_layout = true;
+                                }
+                            }
+                        }
+                    }
+                    label.set_text(text);
+                }
+            }
+        }
+
+        if needs_layout {
+            self.update_layout();
+            if let Some(w) = &self.window {
+                w.request_redraw();
+            }
+        }
+    }
+    fn handle_select(&mut self) {}
 }
 
 impl ApplicationHandler for AppWinit {
@@ -331,6 +387,17 @@ impl ApplicationHandler for AppWinit {
 
                 self.hover_manager
                     .hover(self.cursor_position.0, self.cursor_position.1);
+
+                if let Some(state) = self.state.as_mut() {
+                    let fonts = state.glyph_brush.fonts();
+
+                    let layout_context = LayoutContext { fonts: fonts };
+                    self.select_manager.select(
+                        self.cursor_position.0,
+                        self.cursor_position.1,
+                        &layout_context,
+                    );
+                }
                 //println!("{} {}", self.cursor_position.0, self.cursor_position.1);
             }
             WindowEvent::MouseInput { state, button, .. } => {
@@ -338,8 +405,32 @@ impl ApplicationHandler for AppWinit {
                     && state == winit::event::ElementState::Pressed
                 {
                     let (mx, my) = self.cursor_position;
+                    self.edit_label = None;
+
                     self.button_manager.click(mx as u16, my as u16);
+
+                    if let Some(state) = self.state.as_mut() {
+                        let fonts = state.glyph_brush.fonts();
+
+                        let layout_context = LayoutContext { fonts: fonts };
+                        self.select_manager.select_start(
+                            self.cursor_position.0,
+                            self.cursor_position.1,
+                            &layout_context,
+                        );
+                    }
+                } else if button == winit::event::MouseButton::Left
+                    && state == winit::event::ElementState::Released
+                {
+                    self.select_manager.stop_select();
                 }
+            }
+            WindowEvent::KeyboardInput {
+                device_id,
+                event,
+                is_synthetic,
+            } => {
+                self.handle_key(event);
             }
             _ => (),
         }
@@ -361,10 +452,16 @@ impl ComponentControl for AppWinit {
             .borrow_mut()
             .set_default_settings(&self.panel.base.settings);
 
-        self.panel
-            .get_button_manager(&mut self.button_manager, &InternalAccess(()));
-        self.panel
-            .get_hover_manager(&mut self.hover_manager, &InternalAccess(()));
+        self.panel.get_managers(
+            &mut self.button_manager,
+            &mut self.hover_manager,
+            &mut self.select_manager,
+            &InternalAccess(()),
+        );
+        // self.panel
+        //     .get_button_manager(&mut self.button_manager, &InternalAccess(()));
+        // self.panel
+        //     .get_hover_manager(&mut self.hover_manager, &InternalAccess(()));
 
         return shared;
     }

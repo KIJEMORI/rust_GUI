@@ -8,6 +8,8 @@ pub enum UiCommand {
     SetText(Option<SharedDrawable>, String),
     Custom(Rc<dyn Fn()>),
     SetScale(Option<SharedDrawable>, u16),
+    EditLabel(Option<SharedDrawable>),
+    RequestRedraw(),
     Batch(Vec<UiCommand>),
 }
 
@@ -21,12 +23,14 @@ impl UiCommand {
             }
             UiCommand::ChangeColor(target, _)
             | UiCommand::SetText(target, _)
-            | UiCommand::SetScale(target, _) => {
+            | UiCommand::SetScale(target, _)
+            | UiCommand::EditLabel(target) => {
                 if target.is_none() {
                     *target = Some(Rc::clone(item));
                 }
             }
             UiCommand::Custom(..) => (),
+            _ => (),
         }
     }
 }

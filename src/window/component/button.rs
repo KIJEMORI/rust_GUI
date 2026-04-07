@@ -57,24 +57,6 @@ impl Button {
     pub fn set_width(&mut self, w: u16) {
         self.label.set_width(w);
     }
-
-    fn fill_self_ref(&self, cmd: &mut UiCommand) {
-        match cmd {
-            UiCommand::Batch(cmds) => {
-                for c in cmds {
-                    self.fill_self_ref(c);
-                }
-            }
-            UiCommand::ChangeColor(target, _)
-            | UiCommand::SetText(target, _)
-            | UiCommand::SetScale(target, _) => {
-                if target.is_none() {
-                    *target = Some(self.label.panel.base.get_shared());
-                }
-            }
-            UiCommand::Custom(..) => (),
-        }
-    }
 }
 
 impl Drawable for Button {
@@ -93,7 +75,7 @@ impl Drawable for Button {
     fn set_margin(&mut self, direction: Direction) {
         self.label.set_margin(direction);
     }
-    fn set_const_layout(&mut self, const_layout: &dyn ConstLayout) {
+    fn set_const_layout(&mut self, const_layout: Option<Box<dyn ConstLayout>>) {
         self.label.set_const_layout(const_layout);
     }
     fn get_margin(&self) -> &Direction {
@@ -160,10 +142,22 @@ impl LabelControl for Button {
     fn set_text(&mut self, text: String) {
         self.label.set_text(text);
     }
+    fn get_text(&self) -> String {
+        self.label.get_text()
+    }
     fn set_text_str(&mut self, text: &str) {
         self.label.set_text_str(&text);
     }
     fn set_scale(&mut self, scale: u16) {
         self.label.set_scale(scale);
+    }
+    fn remove_select(&mut self) {
+        self.label.remove_select();
+    }
+    fn set_start_caret(&mut self, select_start: (u16, u16), ctx: &LayoutContext) {
+        self.label.set_start_caret(select_start, ctx);
+    }
+    fn set_end_caret(&mut self, select_end: (u16, u16), ctx: &LayoutContext) {
+        self.label.set_end_caret(select_end, ctx);
     }
 }

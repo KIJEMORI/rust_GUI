@@ -4,6 +4,7 @@ use crate::window::component::base::area::Rect;
 use crate::window::component::base::base::Base;
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
 use crate::window::component::base::hover_manager::HoverManager;
+use crate::window::component::base::select_manager::{self, SelectManager};
 use crate::window::component::base::settings::Settings;
 use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::button::ButtonManager;
@@ -18,20 +19,29 @@ pub struct InternalAccess(pub(crate) ());
 pub trait Drawable: Any {
     fn print(&self, ctx: &mut GpuRenderContext);
     fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext) -> Rect<i16>;
-    #[doc(hidden)]
-    fn get_button_manager(&self, button_manager: &mut ButtonManager, token: &InternalAccess);
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
     fn set_padding(&mut self, direction: Direction);
     fn set_margin(&mut self, direction: Direction);
     fn get_padding(&self) -> &Direction;
     fn get_margin(&self) -> &Direction;
-    fn set_const_layout(&mut self, const_layout: &dyn ConstLayout);
+    fn set_const_layout(&mut self, const_layout: Option<Box<dyn ConstLayout>>);
     fn set_default_settings(&mut self, settings: &Settings);
     fn is_clickable(&mut self) -> bool;
     fn is_hoverable(&mut self) -> bool;
+    fn is_selectable(&self) -> bool {
+        false
+    }
     fn hover(&self, mx: u16, my: u16) -> bool;
-    fn get_hover_manager<'a>(&'a self, hover_manager: &mut HoverManager, token: &InternalAccess);
+    #[allow(unused_variables)]
+    fn get_managers<'a>(
+        &'a self,
+        button_manager: &mut ButtonManager,
+        hover_manager: &mut HoverManager,
+        select_manager: &mut SelectManager,
+        token: &InternalAccess,
+    ) {
+    }
     fn set_on_click(&mut self, action: UiCommand);
     fn set_on_mouse_enter(&mut self, action: UiCommand);
     fn set_on_mouse_leave(&mut self, action: UiCommand);
@@ -48,18 +58,6 @@ pub trait Drawable: Any {
 #[macro_export]
 macro_rules! add_drawable_control {
     () => {
-        fn get_button_manager(
-            &self,
-            _button_manager: &mut $crate::window::component::button::ButtonManager,
-            _token: &$crate::window::component::interface::drawable::InternalAccess,
-        ) {
-        }
-        fn get_hover_manager(
-            &self,
-            _hover_manager: &mut $crate::window::component::base::hover_manager::HoverManager,
-            _token: &$crate::window::component::interface::drawable::InternalAccess,
-        ) {
-        }
         fn as_any(&self) -> &dyn Any {
             self
         }

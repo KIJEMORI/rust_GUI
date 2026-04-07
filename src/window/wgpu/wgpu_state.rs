@@ -29,7 +29,6 @@ impl WgpuState {
     ) -> Self {
         let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/shader1.wgsl"));
 
-        // В WgpuState добавьте:
         let screen_uniform = ScreenUniform {
             size: [800.0, 600.0],
             _padding: [0.0, 0.0],
@@ -84,7 +83,7 @@ impl WgpuState {
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),

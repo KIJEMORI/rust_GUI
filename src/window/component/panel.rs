@@ -7,6 +7,7 @@ use crate::window::component::base::base::Base;
 use crate::window::component::base::component_type::SharedDrawable;
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
 use crate::window::component::base::hover_manager::HoverManager;
+use crate::window::component::base::select_manager::SelectManager;
 use crate::window::component::base::settings::Settings;
 use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::button::ButtonManager;
@@ -101,12 +102,10 @@ impl Drawable for Panel {
 
         let padding_rect = self.layout.padding_area(&self.base.rect);
         // Список размещений потомков структуры
-        let mut layout = Vec::new();
-        layout.push(padding_rect);
+        let mut layout = padding_rect;
         for child in self.childs.iter_mut() {
-            let size = layout.len();
             // Берем текущую свободную область
-            let current_free_zone = layout[size - 1].clone();
+            let current_free_zone = layout.clone();
 
             // Получаем маржин ребенка
             let margin = child.borrow().get_margin().clone();
@@ -117,10 +116,32 @@ impl Drawable for Panel {
             // Рассчитываем, что осталось после размещения ребенка
             let remainder = self.layout.next(&child_rect, &current_free_zone, margin);
 
-            layout.push(remainder);
+            layout = remainder;
         }
 
         return self.base.rect.clone();
+    }
+    fn get_managers<'a>(
+        &'a self,
+        button_manager: &mut ButtonManager,
+        hover_manager: &mut HoverManager,
+        select_manager: &mut SelectManager,
+        token: &InternalAccess,
+    ) {
+        for child in self.childs.iter() {
+            if child.borrow_mut().is_clickable() {
+                button_manager.add(Rc::clone(&child));
+            }
+            if child.borrow_mut().is_hoverable() {
+                hover_manager.add(Rc::clone(&child));
+            }
+            if child.borrow().is_selectable() {
+                select_manager.add(Rc::clone(&child));
+            }
+            child
+                .borrow()
+                .get_managers(button_manager, hover_manager, select_manager, token);
+        }
     }
 
     fn set_on_click(&mut self, action: UiCommand) {
@@ -138,18 +159,18 @@ impl Drawable for Panel {
         }
     }
 
-    fn get_button_manager<'a>(
-        &'a self,
-        button_manager: &mut ButtonManager,
-        token: &InternalAccess,
-    ) {
-        for child in self.childs.iter() {
-            if child.borrow_mut().is_clickable() {
-                button_manager.add(Rc::clone(&child));
-            }
-            child.borrow().get_button_manager(button_manager, token);
-        }
-    }
+    // fn get_button_manager<'a>(
+    //     &'a self,
+    //     button_manager: &mut ButtonManager,
+    //     token: &InternalAccess,
+    // ) {
+    //     for child in self.childs.iter() {
+    //         if child.borrow_mut().is_clickable() {
+    //             button_manager.add(Rc::clone(&child));
+    //         }
+    //         child.borrow().get_button_manager(button_manager, token);
+    //     }
+    // }
 
     fn as_any(&self) -> &dyn Any {
         self
@@ -165,7 +186,9 @@ impl Drawable for Panel {
     fn set_margin(&mut self, direction: Direction) {
         self.layout.set_margin(direction);
     }
-    fn set_const_layout(&mut self, const_layout: &dyn ConstLayout) {}
+    fn set_const_layout(&mut self, const_layout: Option<Box<dyn ConstLayout>>) {
+        self.layout.set_const_layout(const_layout);
+    }
 
     fn get_margin(&self) -> &Direction {
         &self.layout.get_margin()
@@ -197,15 +220,15 @@ impl Drawable for Panel {
         }
         false
     }
-    fn get_hover_manager<'a>(&'a self, hover_manager: &mut HoverManager, token: &InternalAccess) {
-        for child in self.childs.iter() {
-            if child.borrow_mut().is_hoverable() {
-                hover_manager.add(Rc::clone(&child));
-            } else {
-                child.borrow().get_hover_manager(hover_manager, token);
-            }
-        }
-    }
+    // fn get_hover_manager<'a>(&'a self, hover_manager: &mut HoverManager, token: &InternalAccess) {
+    //     for child in self.childs.iter() {
+    //         if child.borrow_mut().is_hoverable() {
+    //             hover_manager.add(Rc::clone(&child));
+    //         } else {
+    //             child.borrow().get_hover_manager(hover_manager, token);
+    //         }
+    //     }
+    // }
     fn on_mouse_enter(&self) {
         if let Some(cmd) = &self.on_mouse_enter {
             let command_to_send = cmd.clone();

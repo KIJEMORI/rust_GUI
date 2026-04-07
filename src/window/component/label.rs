@@ -1,6 +1,6 @@
 use std::any::Any;
 
-use wgpu_glyph::ab_glyph::{Font, FontArc, ScaleFont};
+use wgpu_glyph::ab_glyph::{Font, FontArc, PxScaleFont, ScaleFont};
 use wgpu_glyph::{FontId, GlyphPositioner, Layout, SectionGeometry, SectionText};
 
 use crate::add_drawable_control;
@@ -23,6 +23,10 @@ pub struct Label {
     pub scale: f32,
     color: u32,
     needs_layout: bool,
+    select_index_start: usize,
+    select_index_end: usize,
+    select_color: u32,
+    select_rect: Rect<i16>,
 }
 
 impl Label {
@@ -34,6 +38,10 @@ impl Label {
             scale: 20.0,
             color: 0xFF000000,
             needs_layout: true,
+            select_index_start: 0,
+            select_index_end: 0,
+            select_color: 0xAAFFFFFF,
+            select_rect: Rect::default(),
         }
     }
 
@@ -115,6 +123,27 @@ impl Label {
         self.panel.set_width(w);
         self.panel.set_height(h);
     }
+    fn get_index(&self, target_x: f32, scaled_font: PxScaleFont<&FontArc>) -> usize {
+        let rect = &self.panel.base.rect;
+        let mut current_x = 0.0;
+        let mut last_glyph_id = None;
+        let local_x = target_x - rect.x1 as f32;
+
+        for (i, c) in self.text.chars().enumerate() {
+            let glyph_id = scaled_font.glyph_id(c);
+            if let Some(last_id) = last_glyph_id {
+                current_x += scaled_font.kern(last_id, glyph_id);
+            }
+            let advance = scaled_font.h_advance(glyph_id);
+
+            if local_x < current_x + advance / 2.0 {
+                return i;
+            }
+            current_x += advance;
+            last_glyph_id = Some(glyph_id);
+        }
+        self.text.chars().count() // Если кликнули правее всего текста
+    }
 }
 
 impl LabelControl for Label {
@@ -135,8 +164,43 @@ impl LabelControl for Label {
     fn set_text(&mut self, text: String) {
         self.text = text;
     }
+    fn get_text(&self) -> String {
+        self.text.clone()
+    }
     fn set_text_str(&mut self, text: &str) {
         self.text = text.to_string();
+    }
+
+    fn remove_select(&mut self) {
+        self.select_index_start = 0;
+        self.select_index_end = 0;
+        self.select_rect = Rect::default();
+
+        if let Some(tx) = &self.panel.base.settings.command_tx {
+            let _ = tx.send(UiCommand::RequestRedraw());
+        }
+    }
+    fn set_start_caret(&mut self, select_start: (u16, u16), ctx: &LayoutContext) {
+        let font = &ctx.fonts[self.panel.base.settings.font_id.0];
+        let scaled_font = font.as_scaled(self.scale);
+
+        self.select_index_start = self.get_index(select_start.0 as f32, scaled_font)
+    }
+    fn set_end_caret(&mut self, select_end: (u16, u16), ctx: &LayoutContext) {
+        let font = &ctx.fonts[self.panel.base.settings.font_id.0];
+        let scaled_font = font.as_scaled(self.scale);
+
+        let last_end_index = self.select_index_end;
+
+        self.select_index_end = self.get_index(select_end.0 as f32, scaled_font);
+
+        if self.select_index_start != self.select_index_end
+            && self.select_index_end != last_end_index
+        {
+            if let Some(tx) = &self.panel.base.settings.command_tx {
+                let _ = tx.send(UiCommand::RequestRedraw());
+            }
+        }
     }
 }
 
@@ -145,6 +209,10 @@ impl Drawable for Label {
         self.panel.print(ctx);
 
         let rect = &self.panel.base.rect;
+
+        if self.select_index_start != self.select_index_end {
+            ctx.push_rect(&self.select_rect, self.select_color);
+        }
         ctx.push_text(
             &self.text,
             rect.x1 as f32,
@@ -169,6 +237,35 @@ impl Drawable for Label {
         let target_h = rect.min.get_height() as f32;
 
         let font = &ctx.fonts[self.panel.base.settings.font_id.0];
+
+        if self.select_index_start != self.select_index_end {
+            let scaled_font = font.as_scaled(self.scale);
+
+            let get_x = |index: usize| -> f32 {
+                let mut x = 0.0;
+                let mut last_id = None;
+                for (i, c) in self.text.chars().enumerate() {
+                    if i >= index {
+                        break;
+                    }
+                    let gid = scaled_font.glyph_id(c);
+                    if let Some(l) = last_id {
+                        x += scaled_font.kern(l, gid);
+                    }
+                    x += scaled_font.h_advance(gid);
+                    last_id = Some(gid);
+                }
+                x
+            };
+
+            let x1_offset = get_x(self.select_index_start);
+            let x2_offset = get_x(self.select_index_end);
+
+            let first_point = ((rect.x1 as f32 + x1_offset.min(x2_offset)) as i16, rect.y1);
+            let second_point = ((rect.x1 as f32 + x1_offset.max(x2_offset)) as i16, rect.y2);
+
+            self.select_rect = Rect::new_from_coord(first_point, second_point);
+        }
 
         if target_w > 0.0 && target_h > 0.0 {
             // Считаем размер текста при маленьком базовом масштабе
@@ -200,7 +297,7 @@ impl Drawable for Label {
     fn set_margin(&mut self, direction: Direction) {
         self.panel.set_margin(direction);
     }
-    fn set_const_layout(&mut self, const_layout: &dyn ConstLayout) {
+    fn set_const_layout(&mut self, const_layout: Option<Box<dyn ConstLayout>>) {
         self.panel.set_const_layout(const_layout);
     }
     fn get_margin(&self) -> &Direction {
@@ -228,6 +325,9 @@ impl Drawable for Label {
     }
     fn on_click(&self) {
         self.panel.on_click();
+    }
+    fn is_selectable(&self) -> bool {
+        true
     }
     fn is_hoverable(&mut self) -> bool {
         if self.panel.is_clickable() {

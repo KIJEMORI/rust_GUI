@@ -39,6 +39,31 @@ pub struct Rect<T> {
     pub max: Size<T>,
 }
 
+impl<T> Default for Rect<T>
+where
+    T: Copy + Add<Output = T> + Sub<Output = T> + PartialOrd + Default,
+{
+    fn default() -> Self {
+        let min = Size {
+            width: T::default(),
+            height: T::default(),
+        };
+
+        let max = Size {
+            width: T::default(),
+            height: T::default(),
+        };
+        Self {
+            x1: T::default(),
+            y1: T::default(),
+            x2: T::default(),
+            y2: T::default(),
+            min: min,
+            max: max,
+        }
+    }
+}
+
 impl<T> Rect<T>
 where
     T: Copy + Add<Output = T> + Sub<Output = T> + PartialOrd + Default,

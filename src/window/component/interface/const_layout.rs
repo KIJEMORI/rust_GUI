@@ -9,7 +9,9 @@ pub trait DirectionControl {
 #[allow(dead_code)]
 pub trait ConstLayout {
     fn set_relative_width(&mut self, width: u8);
+    fn set_normal_width(&mut self);
     fn set_relative_height(&mut self, height: u8);
-    fn get_width(&self, width: u16) -> u16;
-    fn get_height(&self, height: u16) -> u16;
+    fn set_normal_height(&mut self);
+    fn get_width(&self, width: u16, parent_width: u16) -> u16;
+    fn get_height(&self, height: u16, parent_height: u16) -> u16;
 }
