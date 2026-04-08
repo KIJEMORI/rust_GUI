@@ -9,24 +9,25 @@ use wgpu::RenderPassColorAttachment;
 
 use wgpu_glyph::{GlyphCruncher, Text};
 use winit::application::ApplicationHandler;
-use winit::event::{KeyEvent, WindowEvent};
+use winit::event::{KeyEvent, MouseScrollDelta, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId};
 
-use crate::window::component::animation::animation_manager::AnimationManager;
 use crate::window::component::base::area::Rect;
-use crate::window::component::base::component_type::{SharedDrawable, SharedDrawableExt};
-use crate::window::component::base::edit_label_manager::EditLabelManager;
+use crate::window::component::base::component_type::SharedDrawable;
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
-use crate::window::component::base::hover_manager::HoverManager;
-use crate::window::component::base::select_manager::SelectManager;
 use crate::window::component::base::settings::Settings;
 use crate::window::component::base::ui_command::UiCommand;
-use crate::window::component::button::ButtonManager;
 use crate::window::component::interface::component_control::{ComponentControl, PanelControl};
 use crate::window::component::interface::drawable::{Drawable, InternalAccess};
 use crate::window::component::interface::layout::Layout;
 use crate::window::component::layout::layout_context::LayoutContext;
+use crate::window::component::managers::animation_manager::AnimationManager;
+use crate::window::component::managers::button_manager::ButtonManager;
+use crate::window::component::managers::edit_label_manager::EditLabelManager;
+use crate::window::component::managers::hover_manager::HoverManager;
+use crate::window::component::managers::scroll_manager::ScrollManager;
+use crate::window::component::managers::select_manager::SelectManager;
 use crate::window::component::panel::Panel;
 use crate::window::wgpu::draw_args::DrawIndirectArgs;
 use crate::window::wgpu::text_vertex::{TextVertex, push_glyph_to_vertices_raw};
@@ -35,13 +36,14 @@ use crate::window::wgpu::wgpu_state::WgpuState;
 pub struct AppWinit {
     window: Option<Arc<Window>>,
     state: Option<WgpuState>,
-    panel: Panel,
+    pub panel: Panel,
     cursor_position: (u16, u16),
     button_manager: ButtonManager,
     hover_manager: HoverManager,
     select_manager: SelectManager,
     edit_label_manager: EditLabelManager,
     animation_manager: AnimationManager,
+    scroll_manager: ScrollManager,
     commands_rx: Receiver<UiCommand>,
     commands_tx: Sender<UiCommand>,
     next_redraw: Option<Instant>,
@@ -67,11 +69,13 @@ impl Default for AppWinit {
             select_manager: SelectManager::default(),
             edit_label_manager: EditLabelManager::default(),
             animation_manager: AnimationManager::default(),
+            scroll_manager: ScrollManager::default(),
             commands_tx: tx,
             commands_rx: rx,
             next_redraw: None,
             gpu_ctx: GpuRenderContext {
-                vertices: Vec::with_capacity(1024),
+                shape_vertices: Vec::with_capacity(1024),
+                shape_section_offsets: Vec::with_capacity(1024),
                 texts: Vec::with_capacity(100),
                 text_storage: String::with_capacity(4096),
             },
@@ -92,61 +96,53 @@ impl AppWinit {
             self.panel.resize(
                 &Rect::new(0, 0, window_size.width as i16, window_size.height as i16),
                 &layout_context,
+                false,
             );
         }
     }
     pub fn process_commands(&mut self) {
         let mut needs_layout = false;
+        let mut resize = false;
 
         while let Ok(cmd) = self.commands_rx.try_recv() {
-            self.execute_command(cmd, &mut needs_layout);
+            cmd.execute_command();
+            self.execute_command(cmd, &mut needs_layout, &mut resize);
         }
 
         if needs_layout {
-            self.update_layout(); // Пересчитываем геометрию ОДИН раз для всех изменений
+            if resize {
+                self.update_layout();
+            } // Пересчитываем геометрию ОДИН раз для всех изменений
             if let Some(w) = &self.window {
                 w.request_redraw();
             }
         }
     }
-    fn execute_command(&mut self, cmd: UiCommand, needs_layout: &mut bool) {
+    fn execute_command(&mut self, cmd: UiCommand, needs_layout: &mut bool, resize: &mut bool) {
         match cmd {
             UiCommand::Batch(commands) => {
                 for c in commands {
-                    self.execute_command(c, needs_layout);
+                    self.execute_command(c, needs_layout, resize);
                 }
             }
-            UiCommand::ChangeColor(el, color) => {
-                if let Some(el) = el {
-                    el.call_as_mut::<Panel>(|pn| pn.set_background(color));
-                    *needs_layout = true;
-                }
+            UiCommand::ChangeColor(_, _) | UiCommand::RequestRedrawWithoutResize() => {
+                *needs_layout = true;
             }
-            UiCommand::SetScale(el, scale) => {
-                if let Some(el) = el {
-                    let mut e = el.borrow_mut();
-                    if let Some(ctrl) = e.as_label_control_mut() {
-                        ctrl.set_scale(scale);
-                        *needs_layout = true;
-                    }
-                }
+            UiCommand::SetScale(_, _)
+            | UiCommand::SetText(_, _)
+            | UiCommand::RequestRedraw()
+            | UiCommand::Custom(_, _) => {
+                *needs_layout = true;
+                *resize = true
             }
-            UiCommand::SetText(el, text) => {
-                if let Some(el) = el {
-                    let mut e = el.borrow_mut();
-                    if let Some(ctrl) = e.as_label_control_mut() {
-                        ctrl.set_text(text);
-                        *needs_layout = true;
-                    }
-                }
-            }
+
             UiCommand::EditLabel(el) => {
                 if let Some(el) = el {
                     self.edit_label_manager.set_edit_label(el);
                     *needs_layout = true;
+                    *resize = true
                 }
             }
-            UiCommand::RequestRedraw() => *needs_layout = true,
             UiCommand::RequestRedrawWithTimer(time) => {
                 let scheduled = std::time::Instant::now() + time;
                 self.next_redraw = Some(match self.next_redraw {
@@ -154,63 +150,24 @@ impl AppWinit {
                     None => scheduled,
                 });
             }
-            UiCommand::SetOnClick(el, command) => {
+            UiCommand::SetOnClick(el, _) => {
                 if let Some(el) = el {
-                    let cmd = *command;
-                    if let Some(clickable) = el.borrow_mut().as_clickable() {
-                        clickable.set_on_click(cmd);
-                    }
-                    self.button_manager.add(Rc::clone(&el));
+                    self.button_manager.add(el);
                 }
             }
-            UiCommand::SetOnMouseEnter(el, command) => {
+            UiCommand::SetOnMouseEnter(el, _) => {
                 if let Some(el) = el {
-                    let cmd = *command;
-                    if let Some(hovearable) = el.borrow_mut().as_hoverable() {
-                        hovearable.set_on_mouse_enter(cmd);
-                    }
-                    self.hover_manager.add(Rc::clone(&el));
+                    self.hover_manager.add(el);
                 }
             }
-            UiCommand::SetOnMouseLeave(el, command) => {
+            UiCommand::SetOnMouseLeave(el, _) => {
                 if let Some(el) = el {
-                    let cmd = *command;
-                    if let Some(hovearable) = el.borrow_mut().as_hoverable() {
-                        hovearable.set_on_mouse_leave(cmd);
-                    }
-                    self.hover_manager.add(Rc::clone(&el));
-                }
-            }
-            UiCommand::SetAnimation(el, animation) => {
-                if let Some(el) = el {
-                    if let Some(with_animation) = el.borrow_mut().as_with_animation() {
-                        with_animation.set_animation((*animation).clone());
-                    }
-                }
-            }
-            UiCommand::AddAnimation(el, animation) => {
-                if let Some(el) = el {
-                    if let Some(with_animation) = el.borrow_mut().as_with_animation() {
-                        with_animation.add_animation((*animation).clone());
-                    }
-                }
-            }
-            UiCommand::AddAnimationBatch(el, animations) => {
-                if let Some(el) = el {
-                    if let Some(with_animation) = el.borrow_mut().as_with_animation() {
-                        with_animation.add_animation_batch((*animations).clone());
-                    }
+                    self.hover_manager.add(el);
                 }
             }
             UiCommand::StartAnimation(el) => {
                 if let Some(el) = el {
-                    self.animation_manager.start(Rc::clone(&el));
-                }
-            }
-            UiCommand::Custom(el, action) => {
-                if let Some(el) = el {
-                    (action)(el);
-                    *needs_layout = true;
+                    self.animation_manager.start(el);
                 }
             }
             _ => (),
@@ -314,6 +271,7 @@ impl ApplicationHandler for AppWinit {
                     self.panel.resize(
                         &Rect::new(0, 0, width as i16, height as i16),
                         &layout_context,
+                        false,
                     );
 
                     let screen_uniform = [size.width as f32, size.height as f32, 0.0, 0.0]; // +padding
@@ -354,7 +312,8 @@ impl ApplicationHandler for AppWinit {
                             label: Some("Main Render Encoder"),
                         });
 
-                self.panel.print(&mut self.gpu_ctx, &self.panel.base.rect);
+                self.panel
+                    .print(&mut self.gpu_ctx, &self.panel.base.rect, (0.0, 0.0));
 
                 {
                     // Начинаем проход отрисовки (Render Pass)
@@ -376,36 +335,84 @@ impl ApplicationHandler for AppWinit {
                         ..Default::default()
                     });
 
-                    if !self.gpu_ctx.vertices.is_empty() {
+                    if !self.gpu_ctx.shape_vertices.is_empty() {
+                        // state.queue.write_buffer(
+                        //     &state.vertex_buffer,
+                        //     0,
+                        //     bytemuck::cast_slice(&self.gpu_ctx.shape_vertices),
+                        // );
+
+                        // render_pass.set_pipeline(&state.panel_pipeline);
+                        // render_pass.set_bind_group(0, &state.bind_group, &[]);
+                        // render_pass.set_vertex_buffer(0, state.vertex_buffer.slice(..));
+
+                        // render_pass.draw(0..self.gpu_ctx.shape_vertices.len() as u32, 0..1);
+
                         state.queue.write_buffer(
                             &state.vertex_buffer,
                             0,
-                            bytemuck::cast_slice(&self.gpu_ctx.vertices),
+                            bytemuck::cast_slice(&self.gpu_ctx.shape_vertices),
                         );
+
+                        state.update_shape_indirect_buffer(&self.gpu_ctx.shape_section_offsets);
 
                         render_pass.set_pipeline(&state.panel_pipeline);
                         render_pass.set_bind_group(0, &state.bind_group, &[]);
                         render_pass.set_vertex_buffer(0, state.vertex_buffer.slice(..));
 
-                        render_pass.draw(0..self.gpu_ctx.vertices.len() as u32, 0..1);
+                        if state
+                            .device
+                            .features()
+                            .contains(wgpu::Features::MULTI_DRAW_INDIRECT)
+                        {
+                            render_pass.multi_draw_indirect(
+                                &state.shape_indirect_buffer,
+                                0,
+                                state.active_shape_commands_count,
+                            );
+                        } else {
+                            let stride = std::mem::size_of::<DrawIndirectArgs>() as u64;
+                            for i in 0..state.active_shape_commands_count {
+                                render_pass
+                                    .draw_indirect(&state.shape_indirect_buffer, i as u64 * stride);
+                            }
+                        }
                     }
 
                     if !self.gpu_ctx.texts.is_empty() {
-                        if state.last_defrag_time.elapsed() > Duration::from_secs(10) {
-                            if state.defragment_if_needed() {
-                                state.last_defrag_time = Instant::now();
-                            }
-                        }
-
                         let texts_count = self.gpu_ctx.texts.len();
+                        let mut force_update = false;
 
-                        if state.section_offsets.len() < texts_count {
+                        if state.section_offsets.len() != texts_count {
                             state.section_offsets.resize(texts_count, 0..0);
+                            //state.section_hashes.clear(); // Полностью сбрасываем хеши
                             state.section_hashes.resize(texts_count, 0);
                             state.section_capacities.resize(texts_count, 0);
+                            //force_update = true;
                         }
                         for (idx, data) in self.gpu_ctx.texts.iter().enumerate() {
                             let content = &self.gpu_ctx.text_storage[data.range.clone()];
+
+                            let mut item_needs_update = force_update;
+
+                            if state.section_offsets[idx].start == state.section_offsets[idx].end
+                                && !content.is_empty()
+                            {
+                                // Если офсет пустой, но текст есть — значит, элемент только что "проснулся"
+                                state.section_hashes[idx] = 0; // Сбрасываем хеш, чтобы форсировать Draw
+                                item_needs_update = true;
+                            }
+                            if content.is_empty() {
+                                if state.section_offsets[idx].end
+                                    != state.section_offsets[idx].start
+                                {
+                                    state.update_section_direct_gpu(idx, Vec::new());
+                                    state.section_hashes[idx] = 0;
+
+                                    // state.update_indirect_buffer();
+                                }
+                                continue; // Пропускаем glyph_brush для пустой строки
+                            }
 
                             let mut hasher = DefaultHasher::new();
                             content.hash(&mut hasher); // Текст
@@ -421,11 +428,19 @@ impl ApplicationHandler for AppWinit {
 
                             if state.section_hashes[idx] != current_hash {
                                 state.section_hashes[idx] = current_hash; // Запоминаем новый хеш
+                                item_needs_update = true;
                             }
 
                             let extra = TextVertex {
                                 position: [0.0, 0.0],
                                 uv: [0.0, 0.0],
+                                version: if item_needs_update {
+                                    Instant::now()
+                                        .duration_since(state.last_defrag_time)
+                                        .as_millis() as u32
+                                } else {
+                                    0
+                                },
                                 color: data.color, // Передаем цвет сюда
                                 clip: data.clip,   // И клип сюда
                                 section_id: idx as u32,
@@ -434,8 +449,15 @@ impl ApplicationHandler for AppWinit {
                                 .with_scale(data.size)
                                 .with_extra(extra);
 
+                            // Если скролл двигается или ресайзится - заставляем браш выдать новые вершины
+                            let x_offset = if force_update {
+                                0.0001 * (idx as f32 + 1.0) // Микро-сдвиг заставляет brush пересчитать геометрию
+                            } else {
+                                0.0
+                            };
+
                             let section = glyph_brush::Section {
-                                screen_position: (data.x, data.y),
+                                screen_position: (data.x + x_offset, data.y),
                                 bounds: (f32::INFINITY, f32::INFINITY),
                                 layout: glyph_brush::Layout::default(),
                                 text: vec![text_fragment],
@@ -513,11 +535,7 @@ impl ApplicationHandler for AppWinit {
                                 state.update_indirect_buffer();
                             }
                             glyph_brush::BrushAction::ReDraw => {
-                                if state.active_commands_count as usize
-                                    != state.section_offsets.len()
-                                {
-                                    state.update_indirect_buffer();
-                                }
+                                state.update_indirect_buffer();
                             }
                         }
 
@@ -583,11 +601,8 @@ impl ApplicationHandler for AppWinit {
                     && state == winit::event::ElementState::Pressed
                 {
                     let (mx, my) = self.cursor_position;
-                    self.edit_label_manager.stop_edit();
 
-                    self.button_manager.click(mx as u16, my as u16);
-
-                    if let Some(state) = self.state.as_mut() {
+                    if let Some(state) = self.state.as_ref() {
                         let fonts = state.glyph_brush.fonts();
 
                         let layout_context = LayoutContext { fonts: fonts };
@@ -597,10 +612,34 @@ impl ApplicationHandler for AppWinit {
                             &layout_context,
                         );
                     }
+                    self.edit_label_manager.stop_edit();
+
+                    self.button_manager.click(mx as u16, my as u16);
                 } else if button == winit::event::MouseButton::Left
                     && state == winit::event::ElementState::Released
                 {
                     self.select_manager.stop_select();
+                }
+            }
+            WindowEvent::MouseWheel { delta, phase, .. } => {
+                let scroll_amount = match delta {
+                    MouseScrollDelta::LineDelta(x, y) => {
+                        // y: 1.0 — вверх, -1.0 — вниз.
+                        y * 30.0
+                    }
+
+                    MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
+                };
+
+                // Если прокрутка активна (или тачпад в процессе движения)
+                if phase == TouchPhase::Moved || phase == TouchPhase::Started {
+                    let (mx, my) = self.cursor_position;
+                    if self.scroll_manager.scroll(mx, my, 0.0, -scroll_amount) {
+                        self.update_layout();
+                        if let Some(w) = &self.window {
+                            w.request_redraw();
+                        }
+                    }
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
@@ -610,11 +649,32 @@ impl ApplicationHandler for AppWinit {
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        self.animation_manager.update(&self.commands_tx);
+        let changed = self.animation_manager.update(&self.commands_tx);
 
         self.process_commands();
 
+        if let Some(state) = self.state.as_mut() {
+            if !changed && state.last_defrag_time.elapsed() > Duration::from_secs(10) {
+                if state.is_defrag_worth_it() {
+                    state.perform_true_defragmentation();
+                    state.last_defrag_time = Instant::now();
+
+                    // После дефрагментации нужно один раз перерисовать,
+                    // так как Indirect Buffer обновился
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
+                }
+            }
+        }
+
         let next_event = self.animation_manager.query_next_timeout();
+
+        if changed {
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+        }
 
         match (next_event, self.next_redraw) {
             (Some(anim_time), Some(redraw_time)) => {
@@ -625,17 +685,6 @@ impl ApplicationHandler for AppWinit {
             }
             (None, None) => {
                 event_loop.set_control_flow(ControlFlow::Wait);
-            }
-        }
-
-        if let Some(state) = self.state.as_mut() {
-            if state.last_defrag_time.elapsed() > Duration::from_secs(10) {
-                if state.defragment_if_needed() {
-                    state.last_defrag_time = Instant::now();
-                    if let Some(window) = self.window.as_ref() {
-                        window.request_redraw();
-                    }
-                }
             }
         }
     }
@@ -657,6 +706,7 @@ impl ComponentControl for AppWinit {
             &mut self.button_manager,
             &mut self.hover_manager,
             &mut self.select_manager,
+            &mut self.scroll_manager,
             &InternalAccess(()),
         );
 

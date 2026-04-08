@@ -14,7 +14,7 @@ use crate::{
         interface::{
             component_control::{FullEditControl, LabelControl, PanelControl},
             const_layout::ConstLayout,
-            drawable::{AnimationDrawable, ClickableDrawable, Drawable},
+            drawable::{AnimationDrawable, Drawable},
         },
         label::Label,
         layout::{const_base_layout::Direction, layout_context::LayoutContext},
@@ -30,7 +30,10 @@ impl EditLabel {
     pub fn new(text: &str) -> Self {
         let mut label = Label::new(text.to_string());
 
-        label.set_on_click(UiCommand::EditLabel(None));
+        label
+            .as_clickable()
+            .unwrap()
+            .set_on_click(UiCommand::EditLabel(None));
 
         let mut steps = Vec::new();
         let on_cursor = |el: SharedDrawable| {
@@ -76,11 +79,11 @@ impl Default for EditLabel {
 }
 
 impl Drawable for EditLabel {
-    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>) {
-        self.label.print(ctx, area);
+    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>, offset: (f32, f32)) {
+        self.label.print(ctx, area, offset);
     }
-    fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext) -> Rect<i16> {
-        self.label.resize(area, ctx)
+    fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext, scroll_item: bool) -> Rect<i16> {
+        self.label.resize(area, ctx, scroll_item)
     }
 
     add_drawable_control!();
@@ -132,5 +135,8 @@ impl Drawable for EditLabel {
     }
     fn as_edit_label_control_mut(&mut self) -> Option<&mut dyn FullEditControl> {
         self.label.as_edit_label_control_mut()
+    }
+    fn as_scrollable(&mut self) -> Option<&mut dyn super::interface::drawable::ScrollableDrawable> {
+        self.label.as_scrollable()
     }
 }

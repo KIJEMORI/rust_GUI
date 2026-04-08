@@ -5,4 +5,5 @@ pub mod edit_label;
 pub mod interface;
 pub mod label;
 pub mod layout;
+pub mod managers;
 pub mod panel;

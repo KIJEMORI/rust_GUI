@@ -24,27 +24,28 @@ impl AnimationManager {
         {
             seq.reset();
             return;
-        }
+        } else {
+            let now = Instant::now();
 
-        let now = Instant::now();
+            let animations_to_add = {
+                item.borrow_mut()
+                    .as_with_animation()
+                    .map(|e| e.get_animations().to_vec())
+            };
 
-        let animations_to_add = {
-            item.borrow_mut()
-                .as_with_animation()
-                .map(|e| e.get_animations().to_vec())
-        };
-
-        if let Some(animations) = animations_to_add {
-            for mut anim in animations {
-                anim.last_tick = now;
-                anim.is_running = true;
-                anim.current_step = 0;
-                self.active.push((Rc::clone(&item), anim));
+            if let Some(animations) = animations_to_add {
+                for mut anim in animations {
+                    anim.last_tick = now;
+                    anim.is_running = true;
+                    anim.current_step = 0;
+                    self.active.push((Rc::clone(&item), anim));
+                }
             }
         }
     }
-    pub fn update(&mut self, tx: &Sender<UiCommand>) {
+    pub fn update(&mut self, tx: &Sender<UiCommand>) -> bool {
         let now = Instant::now();
+        let mut changed = false;
         for (target, seq) in &mut self.active {
             if let Some(target_ref) = target.borrow_mut().as_with_animation() {
                 let should_stop_loop = seq.is_loop && !target_ref.need_animate_loop();
@@ -62,10 +63,10 @@ impl AnimationManager {
             let step = &seq.steps[seq.current_step];
             if now >= seq.last_tick + step.delay {
                 // Выполняем действие шага
-                tx.send(step.action.clone()).ok();
-                tx.send(UiCommand::RequestRedraw()).ok();
-
-                seq.last_tick = now;
+                //tx.send(step.action.clone()).ok();
+                step.action.execute_command();
+                changed = true;
+                seq.last_tick += step.delay;
                 seq.current_step += 1;
 
                 if seq.current_step >= seq.steps.len() {
@@ -78,6 +79,7 @@ impl AnimationManager {
             }
         }
         self.active.retain(|(_, seq)| seq.is_running);
+        changed
     }
 
     pub fn query_next_timeout(&self) -> Option<Instant> {

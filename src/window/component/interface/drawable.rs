@@ -1,18 +1,19 @@
 use std::any::Any;
-use std::time::Instant;
 
 use crate::window::component::animation::animation_action::AnimationSequence;
 use crate::window::component::base::area::Rect;
 use crate::window::component::base::base::Base;
-use crate::window::component::base::component_type::SharedDrawable;
+
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
-use crate::window::component::base::hover_manager::HoverManager;
-use crate::window::component::base::select_manager::SelectManager;
 use crate::window::component::base::settings::Settings;
 use crate::window::component::base::ui_command::UiCommand;
-use crate::window::component::button::ButtonManager;
+use crate::window::component::managers::button_manager::ButtonManager;
+use crate::window::component::managers::hover_manager::HoverManager;
+use crate::window::component::managers::scroll_manager::ScrollManager;
+use crate::window::component::managers::select_manager::SelectManager;
+
 use crate::window::component::interface::component_control::{
-    EditLabelControl, FullEditControl, LabelControl, PanelControl,
+    FullEditControl, LabelControl, PanelControl,
 };
 use crate::window::component::interface::const_layout::ConstLayout;
 use crate::window::component::layout::const_base_layout::Direction;
@@ -22,6 +23,7 @@ pub struct InternalAccess(pub(crate) ());
 
 pub trait ClickableDrawable {
     fn is_clickable(&self) -> bool;
+    fn remove_clickable(&mut self);
     fn set_on_click(&mut self, action: UiCommand);
     fn on_click(&self);
 }
@@ -38,6 +40,14 @@ pub trait SelectableDrawable {
     fn is_selectable(&self) -> bool {
         false
     }
+}
+
+pub trait ScrollableDrawable {
+    fn is_scrollable(&self) -> bool;
+    fn set_scrolable(&mut self);
+    fn set_offset(&mut self, x: f32, y: f32);
+    fn remove_scrolable(&mut self);
+    fn scroll(&mut self, x: f32, y: f32) -> bool;
 }
 
 pub trait AnimationDrawable {
@@ -57,8 +67,8 @@ pub trait AnimationDrawable {
 
 #[allow(dead_code)]
 pub trait Drawable: Any {
-    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>);
-    fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext) -> Rect<i16>;
+    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>, offset: (f32, f32));
+    fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext, scroll_item: bool) -> Rect<i16>;
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 
@@ -77,6 +87,7 @@ pub trait Drawable: Any {
         button_manager: &mut ButtonManager,
         hover_manager: &mut HoverManager,
         select_manager: &mut SelectManager,
+        scroll_manager: &mut ScrollManager,
         token: &InternalAccess,
     ) {
     }
@@ -103,6 +114,9 @@ pub trait Drawable: Any {
         None
     }
     fn as_with_animation(&mut self) -> Option<&mut dyn AnimationDrawable> {
+        None
+    }
+    fn as_scrollable(&mut self) -> Option<&mut dyn ScrollableDrawable> {
         None
     }
 }

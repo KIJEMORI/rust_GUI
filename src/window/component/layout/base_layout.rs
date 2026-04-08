@@ -63,6 +63,12 @@ impl Layout for BaseLayout {
             area.set_height(height as i16);
         }
 
+        return area;
+    }
+
+    fn decrease(&self, area: &Rect<i16>, parent_area: &Rect<i16>) -> Rect<i16> {
+        let mut area = area.clone();
+
         let x_offset = area.get_x_offset() + self.margin.right;
         let parent_x_offset = parent_area.x2;
 
@@ -93,12 +99,20 @@ impl Layout for BaseLayout {
 
         Rect::new_from_coord((x1, y1), (x2, y2))
     }
-    fn next(&self, _area: &Rect<i16>, parent_area: &Rect<i16>, _margin: Direction) -> Rect<i16> {
-        Rect::new(
-            parent_area.x1,
-            parent_area.y1,
-            parent_area.min.get_width(),
-            parent_area.min.get_height(),
+    fn next(
+        &self,
+        _area: &Rect<i16>,
+        parent_area: &Rect<i16>,
+        _margin: Direction,
+    ) -> (Rect<i16>, bool) {
+        (
+            Rect::new(
+                parent_area.x1,
+                parent_area.y1,
+                parent_area.min.get_width(),
+                parent_area.min.get_height(),
+            ),
+            true,
         )
     }
 }

@@ -5,6 +5,7 @@ use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::interface::component_control::ComponentControl;
 use crate::window::component::interface::drawable::Drawable;
 use crate::window::component::interface::layout::Layout;
+use crate::window::component::panel::Panel;
 use crate::window::{app_winit::AppWinit, component::interface::component_control::PanelControl};
 use winit::event_loop::{ControlFlow, EventLoop};
 
@@ -23,6 +24,15 @@ impl App {
         App {
             event_loop: Some(event_loop),
             app: None,
+        }
+    }
+
+    pub fn as_panel(&mut self) -> &mut Panel {
+        if self.app.is_some() {
+            return &mut self.app.as_mut().unwrap().panel;
+        } else {
+            self.app = Some(AppWinit::default());
+            return &mut self.app.as_mut().unwrap().panel;
         }
     }
 

@@ -1,13 +1,14 @@
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use crate::window::component::{
-    base::component_type::SharedDrawable, layout::layout_context::LayoutContext,
+    base::component_type::{SharedDrawable, WeakSharedDrawable},
+    layout::layout_context::LayoutContext,
 };
 
 pub struct SelectManager {
     select: bool,
-    selected_element: Option<SharedDrawable>,
-    items: Vec<SharedDrawable>,
+    selected_element: Option<WeakSharedDrawable>,
+    items: Vec<WeakSharedDrawable>,
 }
 impl Default for SelectManager {
     fn default() -> Self {
@@ -20,7 +21,8 @@ impl Default for SelectManager {
 }
 impl SelectManager {
     pub fn add(&mut self, item: SharedDrawable) {
-        if !self.items.iter().any(|x| Rc::ptr_eq(x, &item)) {
+        let item = Rc::downgrade(&item);
+        if !self.items.iter().any(|x| Weak::ptr_eq(x, &item)) {
             self.items.push(item);
         }
     }
@@ -30,25 +32,29 @@ impl SelectManager {
 
         if !hovered_is_none {
             if let Some(item) = &self.selected_element {
-                if let Some(label) = item.borrow_mut().as_label_control_mut() {
-                    label.remove_select();
-                    hovered_is_none = true;
+                if let Some(item) = item.upgrade() {
+                    if let Some(label) = item.borrow_mut().as_label_control_mut() {
+                        label.remove_select();
+                        hovered_is_none = true;
+                    }
                 }
             }
         }
         if hovered_is_none {
             self.selected_element = None;
             for item in self.items.iter().rev() {
-                let is_hover_item = item.borrow().hover(mx, my);
-                if is_hover_item {
-                    self.selected_element = Some(Rc::clone(item));
-                    if let Some(label) = &self.selected_element {
-                        if let Some(label) = label.borrow_mut().as_label_control_mut() {
+                if let Some(item) = item.upgrade() {
+                    let is_hover_item = item.borrow().hover(mx, my);
+                    if is_hover_item {
+                        self.selected_element = Some(Rc::downgrade(&item));
+
+                        if let Some(label) = item.borrow_mut().as_label_control_mut() {
                             label.set_start_caret((mx, my), ctx);
                             self.select = true;
                         }
+
+                        break;
                     }
-                    break;
                 }
             }
         }
@@ -56,10 +62,10 @@ impl SelectManager {
     pub fn select(&mut self, mx: u16, my: u16, ctx: &LayoutContext) {
         if self.select {
             if let Some(item) = &self.selected_element {
-                let is_still_over = item.borrow().hover(mx, my);
-                if is_still_over {
-                    if let Some(label) = &self.selected_element {
-                        if let Some(label) = label.borrow_mut().as_label_control_mut() {
+                if let Some(item) = item.upgrade() {
+                    let is_still_over = item.borrow().hover(mx, my);
+                    if is_still_over {
+                        if let Some(label) = item.borrow_mut().as_label_control_mut() {
                             label.set_end_caret((mx, my), ctx);
                         }
                     }

@@ -4,8 +4,8 @@ use wgpu::{Device, Queue, Surface as WgpuSurface, SurfaceConfiguration, util::De
 use wgpu_glyph::ab_glyph;
 
 use crate::window::wgpu::{
-    draw_args::DrawIndirectArgs, screen_uniform::ScreenUniform, text_vertex::TextVertex,
-    vertex::Vertex,
+    draw_args::DrawIndirectArgs, screen_uniform::ScreenUniform, shape_vertex::ShapeVertex,
+    text_vertex::TextVertex, vertex::Vertex,
 };
 pub struct WgpuState {
     // База
@@ -19,6 +19,10 @@ pub struct WgpuState {
     pub uniform_buffer: wgpu::Buffer,
     pub panel_pipeline: wgpu::RenderPipeline,
     pub bind_group: wgpu::BindGroup,
+    // Inderected Args Shape
+    pub shape_indirect_buffer: wgpu::Buffer,
+    pub shape_section_offsets: Vec<Range<usize>>, // Офсеты для каждой панели/линии
+    pub active_shape_commands_count: u32,
     // Vetex Label
     pub glyph_brush: glyph_brush::GlyphBrush<TextVertex, TextVertex, ab_glyph::FontArc>,
     // Vertex Label Buffers
@@ -34,7 +38,7 @@ pub struct WgpuState {
     pub active_commands_count: u32,
     pub wasted_vertices: usize,
     pub last_defrag_time: Instant,
-    next_free_vertex: usize,
+    pub next_free_vertex: usize,
 }
 
 const MAX_VERTICES: u64 = 36_000;
@@ -46,7 +50,7 @@ impl WgpuState {
         queue: Queue,
         config: SurfaceConfiguration,
     ) -> Self {
-        let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/shader1.wgsl"));
+        let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/shape_shader.wgsl"));
 
         let screen_uniform = ScreenUniform {
             size: [800.0, 600.0],
@@ -62,7 +66,7 @@ impl WgpuState {
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -94,7 +98,7 @@ impl WgpuState {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[Vertex::desc()],
+                buffers: &[ShapeVertex::desc()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(), // ДОБАВИТЬ
             },
             fragment: Some(wgpu::FragmentState {
@@ -116,7 +120,7 @@ impl WgpuState {
 
         let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Panel Vertex Buffer"),
-            size: MAX_VERTICES * std::mem::size_of::<Vertex>() as u64,
+            size: MAX_VERTICES * std::mem::size_of::<ShapeVertex>() as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, // ОБЯЗАТЕЛЬНО VERTEX
             mapped_at_creation: false,
         });
@@ -129,8 +133,8 @@ impl WgpuState {
         let glyph_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Glyph Atlas"),
             size: wgpu::Extent3d {
-                width: 256,
-                height: 256,
+                width: 1024,
+                height: 1024,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -147,8 +151,9 @@ impl WgpuState {
             "../component/base/Fonts/calibri.ttf"
         ))
         .unwrap();
-        let glyph_brush =
-            glyph_brush::GlyphBrushBuilder::using_font(font).build::<TextVertex, TextVertex>();
+        let glyph_brush = glyph_brush::GlyphBrushBuilder::using_font(font)
+            .initial_cache_size((1024, 1024))
+            .build::<TextVertex, TextVertex>();
         let glyph_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -249,6 +254,13 @@ impl WgpuState {
             cache: None,
         });
 
+        let shape_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Draw Vertex Buffer"),
+            size: MAX_VERTICES * std::mem::size_of::<DrawIndirectArgs>() as u64,
+            usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let draw_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Draw Vertex Buffer"),
             size: MAX_VERTICES * std::mem::size_of::<DrawIndirectArgs>() as u64,
@@ -257,14 +269,22 @@ impl WgpuState {
         });
 
         Self {
+            //Base
             surface: surface,
             device: device,
             queue: queue,
             config: config,
-            vertex_buffer: vertex_buffer,
-            text_vertex_buffer: text_vertex_buffer,
             uniform_buffer: uniform_buffer,
+            // Panel
+            vertex_buffer: vertex_buffer,
+
             panel_pipeline: panel_pipeline,
+            //
+            shape_indirect_buffer: shape_buffer,
+            shape_section_offsets: Vec::new(),
+            active_shape_commands_count: 0,
+            // Label
+            text_vertex_buffer: text_vertex_buffer,
             bind_group: bind_group,
             glyph_brush: glyph_brush,
             section_offsets: Vec::new(),
@@ -317,6 +337,44 @@ impl WgpuState {
     //         );
     //     }
     // }
+    pub fn update_shape_indirect_buffer(&mut self, offsets: &[Range<usize>]) {
+        let commands: Vec<DrawIndirectArgs> = offsets
+            .iter()
+            .map(|range| DrawIndirectArgs {
+                vertex_count: (range.end - range.start) as u32,
+                instance_count: 1,
+                first_vertex: range.start as u32,
+                first_instance: 0,
+            })
+            .collect();
+
+        if commands.is_empty() {
+            self.active_shape_commands_count = 0;
+            return;
+        }
+
+        let size = (commands.len() * std::mem::size_of::<DrawIndirectArgs>()) as u64;
+
+        // Ресайз буфера команд если нужно
+        if self.shape_indirect_buffer.size() < size {
+            self.shape_indirect_buffer.destroy();
+            self.shape_indirect_buffer =
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Shape Indirect Buffer"),
+                        contents: bytemuck::cast_slice(&commands),
+                        usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
+                    });
+        } else {
+            self.queue.write_buffer(
+                &self.shape_indirect_buffer,
+                0,
+                bytemuck::cast_slice(&commands),
+            );
+        }
+
+        self.active_shape_commands_count = commands.len() as u32;
+    }
 
     pub fn ensure_gpu_capacity(&mut self, required_count: usize) {
         let required_size = (required_count * std::mem::size_of::<TextVertex>()) as u64;
@@ -355,6 +413,11 @@ impl WgpuState {
 
     pub fn update_section_direct_gpu(&mut self, s_idx: usize, new_verts: Vec<TextVertex>) {
         let new_len = new_verts.len();
+        if new_len == 0 {
+            let start = self.section_offsets[s_idx].start;
+            self.section_offsets[s_idx] = start..start;
+            return;
+        }
 
         // Если секция новая (cap == 0) или текст не влез
         if self.section_capacities[s_idx] == 0 || new_len > self.section_capacities[s_idx] {
@@ -390,6 +453,16 @@ impl WgpuState {
 
             self.section_offsets[s_idx] = start_idx..(start_idx + new_len);
         }
+        // let offset = (self.next_free_vertex * std::mem::size_of::<TextVertex>()) as u64;
+
+        // self.queue.write_buffer(
+        //     &self.text_vertex_buffer,
+        //     offset,
+        //     bytemuck::cast_slice(&new_verts),
+        // );
+
+        // self.section_offsets[s_idx] = self.next_free_vertex..(self.next_free_vertex + new_len);
+        // self.next_free_vertex += new_len;
     }
 
     pub fn defragment_if_needed(&mut self) -> bool {
@@ -415,17 +488,12 @@ impl WgpuState {
         let commands: Vec<DrawIndirectArgs> = self
             .section_offsets
             .iter()
-            .filter_map(|range| {
-                let count = (range.end - range.start) as u32;
-                if count > 0 {
-                    Some(DrawIndirectArgs {
-                        vertex_count: count,
-                        instance_count: 1,
-                        first_vertex: range.start as u32,
-                        first_instance: 0,
-                    })
-                } else {
-                    None
+            .map(|range| {
+                DrawIndirectArgs {
+                    vertex_count: (range.end - range.start) as u32, // Если скрыт, тут будет 0..0 = 0
+                    instance_count: 1,
+                    first_vertex: range.start as u32,
+                    first_instance: 0,
                 }
             })
             .collect();
@@ -453,5 +521,54 @@ impl WgpuState {
         }
 
         self.active_commands_count = commands.len() as u32;
+    }
+
+    pub fn is_defrag_worth_it(&self) -> bool {
+        let total_capacity: usize = self.section_capacities.iter().sum();
+        let total_actual: usize = self.section_offsets.iter().map(|r| r.end - r.start).sum();
+        // Чистим, если "пустоты" больше 30%
+        total_capacity > (total_actual as f32 * 1.3) as usize && total_capacity > 50_000
+    }
+
+    pub fn perform_true_defragmentation(&mut self) {
+        let mut current_offset = 0;
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Defrag Encoder"),
+            });
+
+        for i in 0..self.section_offsets.len() {
+            let range = &self.section_offsets[i];
+            let len = range.end - range.start;
+
+            if len > 0 {
+                let src_offset = (range.start * std::mem::size_of::<TextVertex>()) as u64;
+                let dst_offset = (current_offset * std::mem::size_of::<TextVertex>()) as u64;
+
+                // Если сектор уже не на своем идеальном месте (есть дырка перед ним)
+                if src_offset != dst_offset {
+                    encoder.copy_buffer_to_buffer(
+                        &self.text_vertex_buffer,
+                        src_offset,
+                        &self.text_vertex_buffer,
+                        dst_offset,
+                        (len * std::mem::size_of::<TextVertex>()) as u64,
+                    );
+                }
+
+                // Обновляем метаданные: теперь этот текст живет по новому адресу
+                self.section_offsets[i] = current_offset..(current_offset + len);
+                self.section_capacities[i] = len; // Ужимаем до реального размера
+                current_offset += len;
+            }
+        }
+
+        self.next_free_vertex = current_offset;
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        // ВАЖНО: Хеши НЕ сбрасываем! GlyphBrush даже не заметит, что мы что-то двигали.
+        self.update_indirect_buffer();
     }
 }

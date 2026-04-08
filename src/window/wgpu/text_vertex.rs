@@ -8,6 +8,7 @@ pub struct TextVertex {
     pub color: [f32; 4],
     pub clip: [f32; 4],
     pub section_id: u32,
+    pub version: u32,
 }
 
 impl TextVertex {
@@ -47,6 +48,7 @@ impl PartialEq for TextVertex {
             && self.uv == other.uv
             && self.color == other.color
             && self.clip == other.clip
+            && self.version == other.version
     }
 }
 
@@ -79,6 +81,7 @@ pub fn push_glyph_to_vertices_raw(
         position: [px.min.x, px.min.y],
         uv: [tex.min.x, tex.min.y],
         color,
+        version: 0,
         clip,
         section_id,
     };
@@ -86,6 +89,7 @@ pub fn push_glyph_to_vertices_raw(
         position: [px.max.x, px.min.y],
         uv: [tex.max.x, tex.min.y],
         color,
+        version: 0,
         clip,
         section_id,
     };
@@ -93,6 +97,7 @@ pub fn push_glyph_to_vertices_raw(
         position: [px.min.x, px.max.y],
         uv: [tex.min.x, tex.max.y],
         color,
+        version: 0,
         clip,
         section_id,
     };
@@ -100,6 +105,7 @@ pub fn push_glyph_to_vertices_raw(
         position: [px.max.x, px.max.y],
         uv: [tex.max.x, tex.max.y],
         color,
+        version: 0,
         clip,
         section_id,
     };

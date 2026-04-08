@@ -41,7 +41,12 @@ impl Layout for RowLayout {
     fn padding_area(&self, area: &Rect<i16>) -> Rect<i16> {
         self.base.padding_area(area)
     }
-    fn next(&self, area: &Rect<i16>, parent_area: &Rect<i16>, margin: Direction) -> Rect<i16> {
+    fn next(
+        &self,
+        area: &Rect<i16>,
+        parent_area: &Rect<i16>,
+        margin: Direction,
+    ) -> (Rect<i16>, bool) {
         let offset_x = margin.left;
         let offset_y = margin.down;
 
@@ -54,6 +59,9 @@ impl Layout for RowLayout {
         let x2 = parent_area.x2;
         let y2 = parent_area.y2;
 
-        Rect::new_from_coord((x1, y1), (x2, y2))
+        (Rect::new_from_coord((x1, y1), (x2, y2)), y1 < y2)
+    }
+    fn decrease(&self, area: &Rect<i16>, parent_area: &Rect<i16>) -> Rect<i16> {
+        self.base.decrease(area, parent_area)
     }
 }

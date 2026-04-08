@@ -40,8 +40,8 @@ pub struct ConstBaseLayout {
 impl ConstBaseLayout {
     pub fn new() -> Self {
         ConstBaseLayout {
-            relative_width: 101,
-            relative_height: 101,
+            relative_width: 0,
+            relative_height: 0,
         }
     }
 }
@@ -51,25 +51,25 @@ impl ConstLayout for ConstBaseLayout {
         self.relative_width = width.min(100);
     }
     fn set_normal_width(&mut self) {
-        self.relative_width = 101;
+        self.relative_width = 0;
     }
 
     fn set_relative_height(&mut self, height: u8) {
         self.relative_height = height.min(100);
     }
     fn set_normal_height(&mut self) {
-        self.relative_height = 101;
+        self.relative_height = 0;
     }
 
     fn get_width(&self, width: u16, parent_width: u16) -> u16 {
-        if self.relative_width != 101 {
+        if self.relative_width != 0 {
             return ((parent_width as u32 * (self.relative_width as u32)) / 100) as u16;
         } else {
             return width;
         }
     }
     fn get_height(&self, height: u16, parent_height: u16) -> u16 {
-        if self.relative_height != 101 {
+        if self.relative_height != 0 {
             return ((parent_height as u32 * (self.relative_height as u32)) / 100) as u16;
         } else {
             return height;

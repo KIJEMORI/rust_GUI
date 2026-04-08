@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use crate::window::component::interface::drawable::Drawable;
 
@@ -9,6 +9,8 @@ pub trait SharedDrawableExt {
     fn call_as<T: 'static>(&self, f: impl FnMut(&T));
     fn call_as_mut<T: 'static>(&self, f: impl FnMut(&mut T));
 }
+
+pub type WeakSharedDrawable = Weak<RefCell<dyn Drawable>>;
 
 impl SharedDrawableExt for SharedDrawable {
     fn call_as<T: 'static>(&self, mut f: impl FnMut(&T)) {

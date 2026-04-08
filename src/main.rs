@@ -27,6 +27,9 @@ fn main() {
     app.set_layout(layout);
 
     let mut panel = Panel::default();
+    let layout = RowLayout::new();
+    panel.set_layout(layout);
+    panel.as_scrollable().unwrap().set_scrolable();
 
     let mut label1 = EditLabel::new("Новая игра");
 
@@ -51,6 +54,15 @@ fn main() {
 
     panel.add(label1);
 
+    for _ in 0..200 {
+        let mut label = Label::from_str("LOL");
+        label
+            .as_panel_control_mut()
+            .unwrap()
+            .set_background(0xFFFF0000);
+        panel.add(label);
+    }
+
     let panel_hov = app.add(panel);
     {
         let panel_setting = Rc::clone(&panel_hov);
@@ -68,6 +80,7 @@ fn main() {
             ));
         }
     }
+
     //let mut button = Label::from_str("FFFFFFFFF FFFFFFFFFFFFFFF");
     let btn_action = UiCommand::Batch(vec![
         UiCommand::ChangeColor(None, 0xFF00FFFF),

@@ -1,6 +1,3 @@
-use std::any::Any;
-use std::time::Instant;
-
 use wgpu_glyph::ab_glyph::{Font, FontArc, PxScaleFont, ScaleFont};
 use wgpu_glyph::{FontId, GlyphPositioner, Layout, SectionGeometry, SectionText};
 use winit::keyboard::SmolStr;
@@ -33,7 +30,6 @@ pub struct Label {
     cursor: Rect<i16>,
     cursor_index: u32,
     pub cursor_color: u32,
-    cursor_byte_idx: u32,
     select_index_start: u32,
     select_index_end: u32,
     select_color: u32,
@@ -53,7 +49,6 @@ impl Label {
             cursor: Rect::default(),
             cursor_index: 0,
             cursor_color: 0xFFFFFF00,
-            cursor_byte_idx: 0,
             select_index_start: 0,
             select_index_end: 0,
             select_color: 0xAAFFFFFF,
@@ -233,9 +228,7 @@ impl LabelControl for Label {
 impl EditLabelControl for Label {
     fn set_cursor(&mut self) {
         self.cursor_need = true;
-
         self.cursor_index = self.select_index_end;
-        self.cursor_byte_idx = self.get_byte_offset(self.cursor_index) as u32;
     }
     fn on_cursor(&mut self) {
         self.cursor_need = true;
@@ -253,20 +246,20 @@ impl EditLabelControl for Label {
             self.select_index_end = self.cursor_index;
             self.select_index_start = self.cursor_index;
         }
+        self.as_with_animation().unwrap().restart_animations();
     }
 
     fn add_text(&mut self, text: &SmolStr) {
-        let byte_idx = self.cursor_byte_idx;
+        let byte_idx = self.get_byte_offset(self.cursor_index) as u32;
 
         if self.select_index_start != self.select_index_end {
             self.delete_selection();
-            self.text.insert_str(self.cursor_byte_idx as usize, text);
+            self.text.insert_str(byte_idx as usize, text);
         } else {
             self.text.insert_str(byte_idx as usize, text);
         }
 
         self.cursor_index += text.chars().count() as u32;
-        self.cursor_byte_idx += text.len() as u32;
 
         self.sync_indexes();
     }
@@ -316,8 +309,7 @@ impl EditLabelControl for Label {
     fn sync_indexes(&mut self) {
         self.select_index_start = self.cursor_index;
         self.select_index_end = self.cursor_index;
-        self.cursor_byte_idx = self.get_byte_offset(self.cursor_index) as u32;
-        self.on_cursor();
+        self.as_with_animation().unwrap().restart_animations();
     }
 
     fn get_byte_offset(&self, char_idx: u32) -> usize {
@@ -329,37 +321,6 @@ impl EditLabelControl for Label {
     }
 }
 
-impl ClickableDrawable for Label {
-    fn is_clickable(&self) -> bool {
-        self.panel.is_clickable()
-    }
-    fn set_on_click(&mut self, action: UiCommand) {
-        self.panel.set_on_click(action);
-    }
-    fn on_click(&self) {
-        self.panel.on_click();
-    }
-}
-
-impl HoverableDrawable for Label {
-    fn is_hoverable(&self) -> bool {
-        self.panel.is_hoverable()
-    }
-
-    fn set_on_mouse_enter(&mut self, action: UiCommand) {
-        self.panel.set_on_mouse_enter(action);
-    }
-    fn set_on_mouse_leave(&mut self, action: UiCommand) {
-        self.panel.set_on_mouse_leave(action);
-    }
-    fn on_mouse_enter(&self) {
-        self.panel.on_mouse_enter();
-    }
-    fn on_mouse_leave(&self) {
-        self.panel.on_mouse_leave();
-    }
-}
-
 impl SelectableDrawable for Label {
     fn is_selectable(&self) -> bool {
         true
@@ -367,58 +328,62 @@ impl SelectableDrawable for Label {
 }
 
 impl Drawable for Label {
-    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>) {
-        self.panel.print(ctx, area);
+    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>, offset: (f32, f32)) {
+        if self.panel.base.visible_on_this_frame {
+            self.panel.print(ctx, area, offset);
 
-        let rect = &self.panel.base.rect;
+            let rect = &self.panel.base.rect;
 
-        if self.select_index_start != self.select_index_end {
-            ctx.push_rect(&self.select_rect, Some(rect), self.select_color);
-        }
-        ctx.push_text(
-            &self.text,
-            rect.x1 as f32,
-            rect.y1 as f32,
-            self.scale,
-            self.color,
-            Some(rect),
-        );
-        if self.cursor_need {
-            ctx.push_rect(&self.cursor, Some(rect), self.cursor_color);
+            let mut new_offset = self.panel.scroll.get_offset();
+            new_offset.0 += offset.0;
+            new_offset.1 += offset.1;
+
+            if self.select_index_start != self.select_index_end {
+                ctx.push_rect_sdf(
+                    &self.select_rect,
+                    Some(&area),
+                    self.select_color,
+                    new_offset,
+                    5.0,
+                );
+            }
+
+            ctx.push_text(
+                &self.text,
+                rect.x1 as f32,
+                rect.y1 as f32,
+                self.scale,
+                self.color,
+                &rect,
+                Some(&area),
+                new_offset,
+            );
+            if self.cursor_need {
+                ctx.push_rect_sdf(
+                    &self.cursor,
+                    Some(&area),
+                    self.cursor_color,
+                    new_offset,
+                    1.0,
+                );
+            }
         }
     }
 
-    fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext) -> Rect<i16> {
+    fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext, scroll_item: bool) -> Rect<i16> {
         if self.needs_layout {
             self.set_max_size(ctx);
 
             self.needs_layout = false
         }
 
-        self.panel.resize(area, ctx);
+        self.panel.resize(area, ctx, scroll_item);
 
         let rect = &self.panel.base.rect;
 
         let font = &ctx.fonts[self.panel.base.settings.font_id.0];
 
-        // let target_w = rect.min.get_width() as f32;
-        // let target_h = rect.min.get_height() as f32;
-
-        // if target_w > 0.0 && target_h > 0.0 {
-        //     // Считаем размер текста при маленьком базовом масштабе
-        //     let base_scale = 10.0;
-        //     let (w_base, h_base) = self.calculate_intrinsic_size(&font, base_scale);
-
-        //     if w_base > 0 && h_base > 0 {
-        //         let ratio_w = target_w / w_base as f32;
-        //         let ratio_h = target_h / h_base as f32;
-
-        //         // Выбираем меньший коэффициент (чтобы влезло и по ширине, и по высоте)
-        //         let optimal_scale = base_scale * ratio_w.min(ratio_h);
-
-        //         self.scale = optimal_scale.min(self.max_scale);
-        //     }
-        // }
+       
 
         let scaled_font = font.as_scaled(self.scale);
 
@@ -476,6 +441,25 @@ impl Drawable for Label {
         }
 
         self.panel.base.rect.clone()
+        
+        // let target_w = rect.min.get_width() as f32;
+        // let target_h = rect.min.get_height() as f32;
+
+        // if target_w > 0.0 && target_h > 0.0 {
+        //     // Считаем размер текста при маленьком базовом масштабе
+        //     let base_scale = 10.0;
+        //     let (w_base, h_base) = self.calculate_intrinsic_size(&font, base_scale);
+
+        //     if w_base > 0 && h_base > 0 {
+        //         let ratio_w = target_w / w_base as f32;
+        //         let ratio_h = target_h / h_base as f32;
+
+        //         // Выбираем меньший коэффициент (чтобы влезло и по ширине, и по высоте)
+        //         let optimal_scale = base_scale * ratio_w.min(ratio_h);
+
+        //         self.scale = optimal_scale.min(self.max_scale);
+        //     }
+        // }
     }
 
     fn hover(&self, mx: u16, my: u16) -> bool {
@@ -532,6 +516,9 @@ impl Drawable for Label {
     }
     fn as_with_animation(&mut self) -> Option<&mut dyn AnimationDrawable> {
         self.panel.as_with_animation()
+    }
+    fn as_scrollable(&mut self) -> Option<&mut dyn super::interface::drawable::ScrollableDrawable> {
+        self.panel.as_scrollable()
     }
 }
 

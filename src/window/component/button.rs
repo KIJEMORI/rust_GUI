@@ -1,50 +1,16 @@
-use std::any::Any;
-use std::rc::Rc;
-
 use crate::add_drawable_control;
-use crate::window::component::animation::animation_action::AnimationSequence;
+
 use crate::window::component::base::area::Rect;
 use crate::window::component::base::base::Base;
-use crate::window::component::base::component_type::SharedDrawable;
+
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
 use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::interface::component_control::{LabelControl, PanelControl};
 use crate::window::component::interface::const_layout::ConstLayout;
-use crate::window::component::interface::drawable::{
-    AnimationDrawable, ClickableDrawable, Drawable,
-};
+use crate::window::component::interface::drawable::{AnimationDrawable, Drawable};
 use crate::window::component::label::Label;
 use crate::window::component::layout::const_base_layout::Direction;
 use crate::window::component::layout::layout_context::LayoutContext;
-
-pub struct ButtonManager {
-    items: Vec<SharedDrawable>,
-}
-
-impl Default for ButtonManager {
-    fn default() -> Self {
-        ButtonManager { items: Vec::new() }
-    }
-}
-
-impl ButtonManager {
-    pub fn add(&mut self, item: SharedDrawable) {
-        if !self.items.iter().any(|x| Rc::ptr_eq(x, &item)) {
-            self.items.push(item);
-        }
-    }
-    pub fn click(&self, mx: u16, my: u16) {
-        for item in self.items.iter().rev() {
-            let is_hover_item = item.borrow().hover(mx, my);
-            if is_hover_item {
-                if let Some(clickable) = item.borrow_mut().as_clickable() {
-                    clickable.on_click();
-                }
-                break;
-            }
-        }
-    }
-}
 
 pub struct Button {
     label: Label,
@@ -54,7 +20,7 @@ pub struct Button {
 impl Button {
     pub fn new(text: &str, action: UiCommand) -> Self {
         let mut label = Label::new(text.to_string());
-        label.set_on_click(action);
+        label.as_clickable().unwrap().set_on_click(action);
 
         Button { label: label }
     }
@@ -68,11 +34,11 @@ impl Button {
 }
 
 impl Drawable for Button {
-    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>) {
-        self.label.print(ctx, area);
+    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>, offset: (f32, f32)) {
+        self.label.print(ctx, area, offset);
     }
-    fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext) -> Rect<i16> {
-        self.label.resize(area, ctx)
+    fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext, scroll_item: bool) -> Rect<i16> {
+        self.label.resize(area, ctx, scroll_item)
     }
 
     add_drawable_control!();
@@ -121,5 +87,8 @@ impl Drawable for Button {
     }
     fn as_with_animation(&mut self) -> Option<&mut dyn AnimationDrawable> {
         self.label.as_with_animation()
+    }
+    fn as_scrollable(&mut self) -> Option<&mut dyn super::interface::drawable::ScrollableDrawable> {
+        self.label.as_scrollable()
     }
 }
