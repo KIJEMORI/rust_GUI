@@ -5,7 +5,7 @@ use crate::window::component::{
 };
 
 #[derive(Clone)]
-pub enum UiCommand {
+pub enum UiCommand<T = ()> {
     ChangeColor(Option<SharedDrawable>, u32),
     SetText(Option<SharedDrawable>, String),
     Custom(Option<SharedDrawable>, Rc<dyn Fn(SharedDrawable)>),
@@ -23,6 +23,7 @@ pub enum UiCommand {
     StartAnimation(Option<SharedDrawable>),
     None(),
     Batch(Vec<UiCommand>),
+    Other(T),
 }
 
 impl UiCommand {

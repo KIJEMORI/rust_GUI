@@ -29,12 +29,13 @@ pub trait LabelControl {
     fn set_text_str(&mut self, text: &str);
     fn set_scale(&mut self, scale: u16);
     fn set_start_caret(&mut self, select_start: (u16, u16), ctx: &LayoutContext);
-    fn set_end_caret(&mut self, select_end: (u16, u16), ctx: &LayoutContext);
+    fn set_end_caret(&mut self, select_end: (u16, u16), ctx: &LayoutContext) -> bool;
     fn remove_select(&mut self);
 }
 
 #[allow(dead_code)]
 pub trait EditLabelControl {
+    fn is_editable(&self) -> bool;
     fn set_cursor(&mut self);
     fn on_cursor(&mut self);
     fn delete_cursor(&mut self);

@@ -1,11 +1,18 @@
 use std::{ops::Range, time::Instant};
 
-use wgpu::{Device, Queue, Surface as WgpuSurface, SurfaceConfiguration, util::DeviceExt};
-use wgpu_glyph::ab_glyph;
+use wgpu::{
+    Device, Queue, RenderPass, Surface as WgpuSurface, SurfaceConfiguration, TextureView,
+    util::DeviceExt,
+};
 
-use crate::window::wgpu::{
-    draw_args::DrawIndirectArgs, screen_uniform::ScreenUniform, shape_vertex::ShapeVertex,
-    text_vertex::TextVertex, vertex::Vertex,
+use crate::window::{
+    component::base::gpu_render_context::{GpuCommand, GpuRenderContext},
+    wgpu::{
+        draw_args::{DrawIndexedIndirectArgs, DrawIndirectArgs},
+        screen_uniform::{ScreenUniform, ScrollData},
+        shape_vertex::GPUShapeVertex,
+        text_vertex::{GPUTextVertex, TextVertex},
+    },
 };
 pub struct WgpuState {
     // База
@@ -14,34 +21,15 @@ pub struct WgpuState {
     pub queue: wgpu::Queue,
     pub config: wgpu::SurfaceConfiguration,
     // Vertex Panel
-    pub vertex_buffer: wgpu::Buffer,
-    pub text_vertex_buffer: wgpu::Buffer,
+    pub shape_vertex: GPUShapeVertex,
+    pub text_vertex: GPUTextVertex,
     pub uniform_buffer: wgpu::Buffer,
-    pub panel_pipeline: wgpu::RenderPipeline,
-    pub bind_group: wgpu::BindGroup,
-    // Inderected Args Shape
-    pub shape_indirect_buffer: wgpu::Buffer,
-    pub shape_section_offsets: Vec<Range<usize>>, // Офсеты для каждой панели/линии
-    pub active_shape_commands_count: u32,
-    // Vetex Label
-    pub glyph_brush: glyph_brush::GlyphBrush<TextVertex, TextVertex, ab_glyph::FontArc>,
-    // Vertex Label Buffers
-    pub section_offsets: Vec<Range<usize>>,
-    pub section_hashes: Vec<u64>,
-    pub section_capacities: Vec<usize>,
-    // Pipeline Label
-    pub glyph_texture: wgpu::Texture,
-    pub text_pipeline: wgpu::RenderPipeline,
-    pub text_bind_group: wgpu::BindGroup,
-    // Inderected Args
-    pub indirect_buffer: wgpu::Buffer,
-    pub active_commands_count: u32,
-    pub wasted_vertices: usize,
-    pub last_defrag_time: Instant,
-    pub next_free_vertex: usize,
+    pub scroll_storage_buffer: wgpu::Buffer,
+    pub depth_stencil_view: TextureView,
 }
 
-const MAX_VERTICES: u64 = 36_000;
+pub const MAX_VERTICES: u64 = 36_000;
+pub const MAX_INDICES: u64 = 36_000;
 
 impl WgpuState {
     pub fn new(
@@ -50,11 +38,9 @@ impl WgpuState {
         queue: Queue,
         config: SurfaceConfiguration,
     ) -> Self {
-        let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/shape_shader.wgsl"));
-
         let screen_uniform = ScreenUniform {
             size: [800.0, 600.0],
-            _padding: [0.0, 0.0],
+            scroll_offset: [0.0, 0.0],
         };
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Uniform Buffer"),
@@ -62,211 +48,41 @@ impl WgpuState {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // BindGroup — это "вход" для буфера в шейдер
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-            label: None,
+        let initial_offsets = vec![
+            ScrollData {
+                offsets: [0.0, 0.0, 0.0, 0.0]
+            };
+            100
+        ];
+
+        let scroll_storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Scroll Storage Buffer"),
+            contents: bytemuck::cast_slice(&initial_offsets),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
-            label: None,
-        });
+        let shape_vertex =
+            GPUShapeVertex::new(&device, &config, &uniform_buffer, &scroll_storage_buffer);
 
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Render Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout], // Сюда передаем наш layout
-            push_constant_ranges: &[],
-        });
+        let text_vertex =
+            GPUTextVertex::new(&device, &config, &uniform_buffer, &scroll_storage_buffer);
 
-        let panel_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[ShapeVertex::desc()],
-                compilation_options: wgpu::PipelineCompilationOptions::default(), // ДОБАВИТЬ
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState::default(), // Рисуем треугольники
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
-
-        let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Panel Vertex Buffer"),
-            size: MAX_VERTICES * std::mem::size_of::<ShapeVertex>() as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, // ОБЯЗАТЕЛЬНО VERTEX
-            mapped_at_creation: false,
-        });
-
-        // Text Pipeline
-
-        let text_shader =
-            device.create_shader_module(wgpu::include_wgsl!("shaders/label_shader.wgsl"));
-
-        let glyph_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Glyph Atlas"),
+        let depth_stencil_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Depth Stencil"),
             size: wgpu::Extent3d {
-                width: 1024,
-                height: 1024,
+                width: config.width,
+                height: config.height,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            format: wgpu::TextureFormat::Depth24PlusStencil8,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
-
-        let glyph_texture_view = glyph_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        let font = ab_glyph::FontArc::try_from_slice(include_bytes!(
-            "../component/base/Fonts/calibri.ttf"
-        ))
-        .unwrap();
-        let glyph_brush = glyph_brush::GlyphBrushBuilder::using_font(font)
-            .initial_cache_size((1024, 1024))
-            .build::<TextVertex, TextVertex>();
-        let glyph_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
-
-        let text_vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Text Vertex Buffer"),
-            size: MAX_VERTICES * std::mem::size_of::<TextVertex>() as u64,
-            usage: wgpu::BufferUsages::VERTEX
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
-
-        let text_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    // Текстура атласа (@binding(0))
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        },
-                        count: None,
-                    },
-                    // Самплер (@binding(1))
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-                label: Some("text_bind_group_layout"),
-            });
-
-        let text_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &text_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&glyph_texture_view), // Теперь работает!
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&glyph_sampler),
-                },
-            ],
-            label: Some("Text Bind Group"),
-        });
-
-        let text_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Text Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout, &text_bind_group_layout],
-            push_constant_ranges: &[],
-        });
-
-        let text_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Text Pipeline"),
-            layout: Some(&text_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &text_shader,
-                entry_point: Some("vs_main"),
-                buffers: &[TextVertex::desc()],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &text_shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::SrcAlpha, // Берем альфу текста
-                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, // Оставляем фон за ним
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                        alpha: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::One,
-                            operation: wgpu::BlendOperation::Max,
-                        },
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
-
-        let shape_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Draw Vertex Buffer"),
-            size: MAX_VERTICES * std::mem::size_of::<DrawIndirectArgs>() as u64,
-            usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let draw_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Draw Vertex Buffer"),
-            size: MAX_VERTICES * std::mem::size_of::<DrawIndirectArgs>() as u64,
-            usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let depth_stencil_view =
+            depth_stencil_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         Self {
             //Base
@@ -274,30 +90,11 @@ impl WgpuState {
             device: device,
             queue: queue,
             config: config,
+            shape_vertex: shape_vertex,
+            text_vertex: text_vertex,
             uniform_buffer: uniform_buffer,
-            // Panel
-            vertex_buffer: vertex_buffer,
-
-            panel_pipeline: panel_pipeline,
-            //
-            shape_indirect_buffer: shape_buffer,
-            shape_section_offsets: Vec::new(),
-            active_shape_commands_count: 0,
-            // Label
-            text_vertex_buffer: text_vertex_buffer,
-            bind_group: bind_group,
-            glyph_brush: glyph_brush,
-            section_offsets: Vec::new(),
-            section_hashes: Vec::new(),
-            section_capacities: Vec::new(),
-            glyph_texture: glyph_texture,
-            text_pipeline: text_pipeline,
-            text_bind_group: text_bind_group,
-            indirect_buffer: draw_buffer,
-            active_commands_count: 0,
-            wasted_vertices: 0,
-            last_defrag_time: Instant::now(),
-            next_free_vertex: 0,
+            scroll_storage_buffer: scroll_storage_buffer,
+            depth_stencil_view: depth_stencil_view,
         }
     }
 
@@ -337,238 +134,183 @@ impl WgpuState {
     //         );
     //     }
     // }
+
     pub fn update_shape_indirect_buffer(&mut self, offsets: &[Range<usize>]) {
-        let commands: Vec<DrawIndirectArgs> = offsets
-            .iter()
-            .map(|range| DrawIndirectArgs {
-                vertex_count: (range.end - range.start) as u32,
-                instance_count: 1,
-                first_vertex: range.start as u32,
-                first_instance: 0,
-            })
-            .collect();
-
-        if commands.is_empty() {
-            self.active_shape_commands_count = 0;
-            return;
-        }
-
-        let size = (commands.len() * std::mem::size_of::<DrawIndirectArgs>()) as u64;
-
-        // Ресайз буфера команд если нужно
-        if self.shape_indirect_buffer.size() < size {
-            self.shape_indirect_buffer.destroy();
-            self.shape_indirect_buffer =
-                self.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Shape Indirect Buffer"),
-                        contents: bytemuck::cast_slice(&commands),
-                        usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
-                    });
-        } else {
-            self.queue.write_buffer(
-                &self.shape_indirect_buffer,
-                0,
-                bytemuck::cast_slice(&commands),
-            );
-        }
-
-        self.active_shape_commands_count = commands.len() as u32;
+        self.shape_vertex
+            .update_shape_indirect_buffer(offsets, &self.device, &self.queue);
     }
 
     pub fn ensure_gpu_capacity(&mut self, required_count: usize) {
-        let required_size = (required_count * std::mem::size_of::<TextVertex>()) as u64;
-        let current_capacity = self.text_vertex_buffer.size();
-
-        if required_size > current_capacity {
-            let new_size = required_size.next_power_of_two();
-
-            let new_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Dynamic Text Vertex Buffer (Expanded)"),
-                size: new_size,
-                usage: wgpu::BufferUsages::VERTEX
-                    | wgpu::BufferUsages::COPY_DST
-                    | wgpu::BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            });
-
-            let mut encoder = self
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-            encoder.copy_buffer_to_buffer(
-                &self.text_vertex_buffer,
-                0,
-                &new_buffer,
-                0,
-                current_capacity,
-            );
-            self.queue.submit(std::iter::once(encoder.finish()));
-
-            self.text_vertex_buffer.destroy();
-            self.text_vertex_buffer = new_buffer;
-
-            println!("GPU Buffer GROW: {} bytes (RAM stays clean)", new_size);
-        }
+        self.text_vertex
+            .ensure_gpu_capacity(required_count, &self.device, &self.queue);
     }
 
     pub fn update_section_direct_gpu(&mut self, s_idx: usize, new_verts: Vec<TextVertex>) {
-        let new_len = new_verts.len();
-        if new_len == 0 {
-            let start = self.section_offsets[s_idx].start;
-            self.section_offsets[s_idx] = start..start;
-            return;
-        }
-
-        // Если секция новая (cap == 0) или текст не влез
-        if self.section_capacities[s_idx] == 0 || new_len > self.section_capacities[s_idx] {
-            let new_padded_cap = (new_len as f32 * 1.5) as usize + 6; // +6 вершин минимум (1 символ)
-
-            self.ensure_gpu_capacity(self.next_free_vertex + new_padded_cap);
-
-            let offset = (self.next_free_vertex * std::mem::size_of::<TextVertex>()) as u64;
-
-            if !new_verts.is_empty() {
-                self.queue.write_buffer(
-                    &self.text_vertex_buffer,
-                    offset,
-                    bytemuck::cast_slice(&new_verts),
-                );
-            }
-
-            self.section_offsets[s_idx] = self.next_free_vertex..(self.next_free_vertex + new_len);
-            self.section_capacities[s_idx] = new_padded_cap;
-            self.next_free_vertex += new_padded_cap;
-        } else {
-            // Влезло в старый слот
-            let start_idx = self.section_offsets[s_idx].start;
-            let offset = (start_idx * std::mem::size_of::<TextVertex>()) as u64;
-
-            if !new_verts.is_empty() {
-                self.queue.write_buffer(
-                    &self.text_vertex_buffer,
-                    offset,
-                    bytemuck::cast_slice(&new_verts),
-                );
-            }
-
-            self.section_offsets[s_idx] = start_idx..(start_idx + new_len);
-        }
-        // let offset = (self.next_free_vertex * std::mem::size_of::<TextVertex>()) as u64;
-
-        // self.queue.write_buffer(
-        //     &self.text_vertex_buffer,
-        //     offset,
-        //     bytemuck::cast_slice(&new_verts),
-        // );
-
-        // self.section_offsets[s_idx] = self.next_free_vertex..(self.next_free_vertex + new_len);
-        // self.next_free_vertex += new_len;
+        self.text_vertex
+            .update_section_direct_gpu(s_idx, new_verts, &self.device, &self.queue);
     }
 
-    pub fn defragment_if_needed(&mut self) -> bool {
-        let total_capacity: usize = self.section_capacities.iter().sum();
-        let total_actual: usize = self.section_offsets.iter().map(|r| r.end - r.start).sum();
-        //println!("Проверка дефрагментации GPU буфера...");
-        if total_capacity > total_actual * 2 && total_capacity > 100_000 {
-            println!("Дефрагментация GPU буфера...");
+    // pub fn defragment_if_needed(&mut self) -> bool {
+    //     let total_capacity: usize = self.section_capacities.iter().sum();
+    //     let total_actual: usize = self.section_offsets.iter().map(|r| r.end - r.start).sum();
+    //     //println!("Проверка дефрагментации GPU буфера...");
+    //     if total_capacity > total_actual * 2 && total_capacity > 100_000 {
+    //         println!("Дефрагментация GPU буфера...");
 
-            self.next_free_vertex = 0;
-            self.section_offsets.fill(0..0);
-            self.section_capacities.fill(0);
-            self.section_hashes.fill(0);
+    //         self.next_free_vertex = 0;
+    //         self.section_offsets.fill(0..0);
+    //         self.section_capacities.fill(0);
+    //         self.section_hashes.fill(0);
 
-            self.wasted_vertices = 0;
-            self.update_indirect_buffer(); // Команды отрисовки теперь указывают на новые места
-            return true;
-        }
-        false
-    }
+    //         self.wasted_vertices = 0;
+    //         self.update_indirect_buffer(); // Команды отрисовки теперь указывают на новые места
+    //         return true;
+    //     }
+    //     false
+    // }
 
     pub fn update_indirect_buffer(&mut self) {
-        let commands: Vec<DrawIndirectArgs> = self
-            .section_offsets
-            .iter()
-            .map(|range| {
-                DrawIndirectArgs {
-                    vertex_count: (range.end - range.start) as u32, // Если скрыт, тут будет 0..0 = 0
-                    instance_count: 1,
-                    first_vertex: range.start as u32,
-                    first_instance: 0,
-                }
-            })
-            .collect();
-
-        if commands.is_empty() {
-            self.active_commands_count = 0;
-            return;
-        }
-
-        let size = (commands.len() * std::mem::size_of::<DrawIndirectArgs>()) as u64;
-
-        // Если старый буфер мал — пересоздаем, если ок — просто пишем в него
-        if self.indirect_buffer.size() < size {
-            self.indirect_buffer.destroy();
-            self.indirect_buffer =
-                self.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Text Indirect Buffer"),
-                        contents: bytemuck::cast_slice(&commands),
-                        usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
-                    });
-        } else {
-            self.queue
-                .write_buffer(&self.indirect_buffer, 0, bytemuck::cast_slice(&commands));
-        }
-
-        self.active_commands_count = commands.len() as u32;
+        self.text_vertex
+            .update_indirect_buffer(&self.device, &self.queue);
     }
 
     pub fn is_defrag_worth_it(&self) -> bool {
-        let total_capacity: usize = self.section_capacities.iter().sum();
-        let total_actual: usize = self.section_offsets.iter().map(|r| r.end - r.start).sum();
-        // Чистим, если "пустоты" больше 30%
-        total_capacity > (total_actual as f32 * 1.3) as usize && total_capacity > 50_000
+        self.text_vertex.is_defrag_worth_it()
     }
 
     pub fn perform_true_defragmentation(&mut self) {
-        let mut current_offset = 0;
+        self.text_vertex
+            .perform_true_defragmentation(&self.device, &self.queue);
+    }
 
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Defrag Encoder"),
-            });
+    pub fn render_shape(&mut self, gpu_ctx: &GpuRenderContext) {
+        self.shape_vertex.render(gpu_ctx, &self.device, &self.queue);
+    }
 
-        for i in 0..self.section_offsets.len() {
-            let range = &self.section_offsets[i];
-            let len = range.end - range.start;
+    pub fn render_text(&mut self, gpu_ctx: &GpuRenderContext, last_render: Instant) {
+        self.text_vertex
+            .render(gpu_ctx, last_render, &self.device, &self.queue);
+    }
 
-            if len > 0 {
-                let src_offset = (range.start * std::mem::size_of::<TextVertex>()) as u64;
-                let dst_offset = (current_offset * std::mem::size_of::<TextVertex>()) as u64;
+    pub fn render(&mut self, gpu_ctx: &GpuRenderContext, render_pass: &mut RenderPass<'_>) {
+        render_pass.set_index_buffer(
+            self.shape_vertex.vertex_index_buffer.slice(..),
+            wgpu::IndexFormat::Uint32,
+        );
 
-                // Если сектор уже не на своем идеальном месте (есть дырка перед ним)
-                if src_offset != dst_offset {
-                    encoder.copy_buffer_to_buffer(
-                        &self.text_vertex_buffer,
-                        src_offset,
-                        &self.text_vertex_buffer,
-                        dst_offset,
-                        (len * std::mem::size_of::<TextVertex>()) as u64,
-                    );
+        let shape_stride = std::mem::size_of::<DrawIndexedIndirectArgs>() as u64;
+        let text_stride = std::mem::size_of::<DrawIndirectArgs>() as u64;
+
+        let mut last_pipeline_is_mask: Option<bool> = None;
+
+        render_pass.set_pipeline(&self.shape_vertex.mask_pipeline);
+
+        for cmd in &gpu_ctx.command_sections {
+            match cmd {
+                GpuCommand::Shape(section) => {
+                    render_pass.set_vertex_buffer(0, self.shape_vertex.vertex_buffer.slice(..));
+                    render_pass.set_bind_group(0, &self.shape_vertex.bind_group, &[]);
+
+                    if section.is_mask {
+                        if last_pipeline_is_mask != Some(true) {
+                            render_pass.set_pipeline(&self.shape_vertex.mask_pipeline);
+                        }
+                        render_pass.set_stencil_reference(section.level - 1);
+                        // Заполняем трафарет
+                    } else {
+                        if last_pipeline_is_mask != Some(false) {
+                            render_pass.set_pipeline(&self.shape_vertex.content_pipeline);
+                        }
+                        render_pass.set_stencil_reference(section.level);
+
+                        // Рисуем контент (он автоматически обрежется)
+                    }
+                    last_pipeline_is_mask = Some(section.is_mask);
+                    // Меняем уровень трафарета ОДИН раз для всей группы
+
+                    if self
+                        .device
+                        .features()
+                        .contains(wgpu::Features::MULTI_DRAW_INDIRECT)
+                    {
+                        // Рисуем всю группу команд одним вызовом
+                        render_pass.multi_draw_indexed_indirect(
+                            &self.shape_vertex.shape_indirect_buffer,
+                            section.command_index as u64 * shape_stride,
+                            section.command_count,
+                        );
+                    } else {
+                        // Fallback: рисуем каждую команду в группе по отдельности
+                        for i in 0..section.command_count {
+                            let offset = (section.command_index + i) as u64 * shape_stride;
+                            render_pass.draw_indexed_indirect(
+                                &self.shape_vertex.shape_indirect_buffer,
+                                offset,
+                            );
+                        }
+                    }
                 }
+                GpuCommand::Text(section) => {
+                    last_pipeline_is_mask = None;
+                    if self.text_vertex.active_commands_count > 0 {
+                        render_pass.set_pipeline(&self.text_vertex.text_pipeline);
+                        render_pass.set_bind_group(0, &self.text_vertex.bind_group, &[]);
+                        render_pass.set_bind_group(1, &self.text_vertex.text_bind_group, &[]);
+                        render_pass
+                            .set_vertex_buffer(0, self.text_vertex.text_vertex_buffer.slice(..));
 
-                // Обновляем метаданные: теперь этот текст живет по новому адресу
-                self.section_offsets[i] = current_offset..(current_offset + len);
-                self.section_capacities[i] = len; // Ужимаем до реального размера
-                current_offset += len;
+                        // Идем по группам текста, разделенным по уровням вложенности
+                        // Устанавливаем уровень трафарета для этого блока текста
+                        render_pass.set_stencil_reference(section.level);
+
+                        if self
+                            .device
+                            .features()
+                            .contains(wgpu::Features::MULTI_DRAW_INDIRECT)
+                        {
+                            render_pass.multi_draw_indirect(
+                                &self.text_vertex.indirect_buffer,
+                                section.command_index as u64 * text_stride,
+                                section.command_count,
+                            );
+                        } else {
+                            for i in 0..section.command_count {
+                                let offset = (section.command_index + i) as u64 * text_stride;
+                                render_pass
+                                    .draw_indirect(&self.text_vertex.indirect_buffer, offset);
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
 
-        self.next_free_vertex = current_offset;
-        self.queue.submit(std::iter::once(encoder.finish()));
+    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+        if new_size.width > 0 && new_size.height > 0 {
+            self.config.width = new_size.width;
+            self.config.height = new_size.height;
+            self.surface.configure(&self.device, &self.config);
 
-        // ВАЖНО: Хеши НЕ сбрасываем! GlyphBrush даже не заметит, что мы что-то двигали.
-        self.update_indirect_buffer();
+            let depth_stencil_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Depth Stencil"),
+                size: wgpu::Extent3d {
+                    width: self.config.width,
+                    height: self.config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth24PlusStencil8,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let depth_stencil_view =
+                depth_stencil_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+            // ОБНОВЛЯЕМ ТРАФАРЕТ ТУТ
+            self.depth_stencil_view = depth_stencil_view
+        }
     }
 }

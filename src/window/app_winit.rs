@@ -29,7 +29,8 @@ use crate::window::component::managers::hover_manager::HoverManager;
 use crate::window::component::managers::scroll_manager::ScrollManager;
 use crate::window::component::managers::select_manager::SelectManager;
 use crate::window::component::panel::Panel;
-use crate::window::wgpu::draw_args::DrawIndirectArgs;
+use crate::window::wgpu::draw_args::{DrawIndexedIndirectArgs, DrawIndirectArgs};
+use crate::window::wgpu::screen_uniform::ScrollData;
 use crate::window::wgpu::text_vertex::{TextVertex, push_glyph_to_vertices_raw};
 use crate::window::wgpu::wgpu_state::WgpuState;
 
@@ -76,8 +77,11 @@ impl Default for AppWinit {
             gpu_ctx: GpuRenderContext {
                 shape_vertices: Vec::with_capacity(1024),
                 shape_section_offsets: Vec::with_capacity(1024),
+                shape_indices: Vec::with_capacity(1024),
                 texts: Vec::with_capacity(100),
                 text_storage: String::with_capacity(4096),
+                offsets: Vec::with_capacity(1024),
+                command_sections: Vec::with_capacity(1024),
             },
             last_render: Instant::now(),
         }
@@ -89,7 +93,7 @@ impl AppWinit {
         if let (Some(window), Some(state)) = (&self.window, &self.state) {
             let window_size = window.inner_size();
 
-            let fonts = state.glyph_brush.fonts();
+            let fonts = state.text_vertex.glyph_brush.fonts();
 
             let layout_context = LayoutContext { fonts: fonts };
 
@@ -198,7 +202,7 @@ impl ApplicationHandler for AppWinit {
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN, // Или DX12
+            backends: wgpu::Backends::PRIMARY, // Или DX12
             flags: wgpu::InstanceFlags::empty(),
             ..Default::default()
         });
@@ -264,7 +268,7 @@ impl ApplicationHandler for AppWinit {
                     self.panel.set_width(width);
                     self.panel.set_height(height);
 
-                    let fonts = state.glyph_brush.fonts();
+                    let fonts = state.text_vertex.glyph_brush.fonts();
 
                     let layout_context = LayoutContext { fonts: fonts };
 
@@ -280,6 +284,8 @@ impl ApplicationHandler for AppWinit {
                         0,
                         bytemuck::cast_slice(&screen_uniform),
                     );
+
+                    state.resize(size);
 
                     if let Some(window) = self.window.as_ref() {
                         window.request_redraw();
@@ -313,7 +319,26 @@ impl ApplicationHandler for AppWinit {
                         });
 
                 self.panel
-                    .print(&mut self.gpu_ctx, &self.panel.base.rect, (0.0, 0.0));
+                    .print(&mut self.gpu_ctx, &self.panel.base.rect, (0.0, 0.0), 1);
+
+                if !self.gpu_ctx.offsets.is_empty() {
+                    let gpu_scrolls: Vec<ScrollData> = self
+                        .gpu_ctx
+                        .offsets
+                        .iter()
+                        .map(|(x, y)| ScrollData {
+                            offsets: [*x, *y, 0.0, 0.0],
+                        })
+                        .collect();
+
+                    if !gpu_scrolls.is_empty() {
+                        state.queue.write_buffer(
+                            &state.scroll_storage_buffer,
+                            0,
+                            bytemuck::cast_slice(&gpu_scrolls),
+                        );
+                    }
+                }
 
                 {
                     // Начинаем проход отрисовки (Render Pass)
@@ -332,6 +357,17 @@ impl ApplicationHandler for AppWinit {
                             },
                             depth_slice: None,
                         })],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: &state.depth_stencil_view, // Твоя вьюшка, которую ты обновляешь в resize
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(1.0), // Просто очистка, даже если не используем
+                                store: wgpu::StoreOp::Discard,
+                            }),
+                            stencil_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(0), // Очищаем трафарет в 0 каждый кадр
+                                store: wgpu::StoreOp::Store, // Сохраняем результат для тестов в этом кадре
+                            }),
+                        }),
                         ..Default::default()
                     });
 
@@ -348,222 +384,14 @@ impl ApplicationHandler for AppWinit {
 
                         // render_pass.draw(0..self.gpu_ctx.shape_vertices.len() as u32, 0..1);
 
-                        state.queue.write_buffer(
-                            &state.vertex_buffer,
-                            0,
-                            bytemuck::cast_slice(&self.gpu_ctx.shape_vertices),
-                        );
-
-                        state.update_shape_indirect_buffer(&self.gpu_ctx.shape_section_offsets);
-
-                        render_pass.set_pipeline(&state.panel_pipeline);
-                        render_pass.set_bind_group(0, &state.bind_group, &[]);
-                        render_pass.set_vertex_buffer(0, state.vertex_buffer.slice(..));
-
-                        if state
-                            .device
-                            .features()
-                            .contains(wgpu::Features::MULTI_DRAW_INDIRECT)
-                        {
-                            render_pass.multi_draw_indirect(
-                                &state.shape_indirect_buffer,
-                                0,
-                                state.active_shape_commands_count,
-                            );
-                        } else {
-                            let stride = std::mem::size_of::<DrawIndirectArgs>() as u64;
-                            for i in 0..state.active_shape_commands_count {
-                                render_pass
-                                    .draw_indirect(&state.shape_indirect_buffer, i as u64 * stride);
-                            }
-                        }
+                        state.render_shape(&self.gpu_ctx);
                     }
 
                     if !self.gpu_ctx.texts.is_empty() {
-                        let texts_count = self.gpu_ctx.texts.len();
-                        let mut force_update = false;
-
-                        if state.section_offsets.len() != texts_count {
-                            state.section_offsets.resize(texts_count, 0..0);
-                            //state.section_hashes.clear(); // Полностью сбрасываем хеши
-                            state.section_hashes.resize(texts_count, 0);
-                            state.section_capacities.resize(texts_count, 0);
-                            //force_update = true;
-                        }
-                        for (idx, data) in self.gpu_ctx.texts.iter().enumerate() {
-                            let content = &self.gpu_ctx.text_storage[data.range.clone()];
-
-                            let mut item_needs_update = force_update;
-
-                            if state.section_offsets[idx].start == state.section_offsets[idx].end
-                                && !content.is_empty()
-                            {
-                                // Если офсет пустой, но текст есть — значит, элемент только что "проснулся"
-                                state.section_hashes[idx] = 0; // Сбрасываем хеш, чтобы форсировать Draw
-                                item_needs_update = true;
-                            }
-                            if content.is_empty() {
-                                if state.section_offsets[idx].end
-                                    != state.section_offsets[idx].start
-                                {
-                                    state.update_section_direct_gpu(idx, Vec::new());
-                                    state.section_hashes[idx] = 0;
-
-                                    // state.update_indirect_buffer();
-                                }
-                                continue; // Пропускаем glyph_brush для пустой строки
-                            }
-
-                            let mut hasher = DefaultHasher::new();
-                            content.hash(&mut hasher); // Текст
-                            data.x.to_bits().hash(&mut hasher); // Позиция X
-                            data.y.to_bits().hash(&mut hasher); // Позиция Y
-                            data.size.to_bits().hash(&mut hasher); // Масштаб
-                            // Хешируем clip [f32; 4]
-                            for val in data.clip {
-                                val.to_bits().hash(&mut hasher);
-                            }
-
-                            let current_hash = hasher.finish();
-
-                            if state.section_hashes[idx] != current_hash {
-                                state.section_hashes[idx] = current_hash; // Запоминаем новый хеш
-                                item_needs_update = true;
-                            }
-
-                            let extra = TextVertex {
-                                position: [0.0, 0.0],
-                                uv: [0.0, 0.0],
-                                version: if item_needs_update {
-                                    Instant::now()
-                                        .duration_since(state.last_defrag_time)
-                                        .as_millis() as u32
-                                } else {
-                                    0
-                                },
-                                color: data.color, // Передаем цвет сюда
-                                clip: data.clip,   // И клип сюда
-                                section_id: idx as u32,
-                            };
-                            let text_fragment = Text::<TextVertex>::new(content)
-                                .with_scale(data.size)
-                                .with_extra(extra);
-
-                            // Если скролл двигается или ресайзится - заставляем браш выдать новые вершины
-                            let x_offset = if force_update {
-                                0.0001 * (idx as f32 + 1.0) // Микро-сдвиг заставляет brush пересчитать геометрию
-                            } else {
-                                0.0
-                            };
-
-                            let section = glyph_brush::Section {
-                                screen_position: (data.x + x_offset, data.y),
-                                bounds: (f32::INFINITY, f32::INFINITY),
-                                layout: glyph_brush::Layout::default(),
-                                text: vec![text_fragment],
-                            };
-
-                            state.glyph_brush.queue(section);
-                        }
-
-                        // АРЕНА: временное хранилище для пересчитанных строк (только грязных)
-                        let mut dirty_section = Vec::new();
-
-                        let ref_dirty_sections = RefCell::new(&mut dirty_section);
-
-                        let action = state
-                            .glyph_brush
-                            .process_queued(
-                                |rect, data| {
-                                    state.queue.write_texture(
-                                        wgpu::TexelCopyTextureInfo {
-                                            texture: &state.glyph_texture,
-                                            mip_level: 0,
-                                            origin: wgpu::Origin3d {
-                                                x: rect.min[0],
-                                                y: rect.min[1],
-                                                z: 0,
-                                            },
-                                            aspect: wgpu::TextureAspect::All,
-                                        },
-                                        data,
-                                        wgpu::TexelCopyBufferLayout {
-                                            offset: 0,
-                                            bytes_per_row: Some(rect.width()),
-                                            rows_per_image: Some(rect.height()),
-                                        },
-                                        wgpu::Extent3d {
-                                            width: rect.width(),
-                                            height: rect.height(),
-                                            depth_or_array_layers: 1,
-                                        },
-                                    );
-                                },
-                                |glyph| {
-                                    let s_idx = glyph.extra.section_id as usize;
-
-                                    // Генерируем 6 вершин (треугольники)
-                                    let vertices = push_glyph_to_vertices_raw(
-                                        glyph.pixel_coords,
-                                        glyph.tex_coords,
-                                        glyph.extra.clip,
-                                        glyph.extra.color,
-                                        glyph.extra.section_id,
-                                    );
-                                    let extra = glyph.extra.clone();
-                                    ref_dirty_sections
-                                        .borrow_mut()
-                                        .push((s_idx, Vec::from(vertices)));
-
-                                    extra
-                                },
-                            )
-                            .expect("Ошибка обработки очереди текста");
-
-                        match action {
-                            glyph_brush::BrushAction::Draw(_) => {
-                                let mut section_map: HashMap<usize, Vec<TextVertex>> =
-                                    HashMap::new();
-                                for (id, verts) in dirty_section {
-                                    section_map.entry(id).or_default().extend_from_slice(&verts);
-                                }
-
-                                for (s_idx, new_verts) in section_map {
-                                    state.update_section_direct_gpu(s_idx, new_verts);
-                                }
-
-                                state.update_indirect_buffer();
-                            }
-                            glyph_brush::BrushAction::ReDraw => {
-                                state.update_indirect_buffer();
-                            }
-                        }
-
-                        if state.active_commands_count > 0 {
-                            render_pass.set_pipeline(&state.text_pipeline);
-                            render_pass.set_bind_group(0, &state.bind_group, &[]); // Uniforms
-                            render_pass.set_bind_group(1, &state.text_bind_group, &[]); // Атлас + Самплер
-                            render_pass.set_vertex_buffer(0, state.text_vertex_buffer.slice(..));
-
-                            if state
-                                .device
-                                .features()
-                                .contains(wgpu::Features::MULTI_DRAW_INDIRECT)
-                            {
-                                render_pass.multi_draw_indirect(
-                                    &state.indirect_buffer,
-                                    0,
-                                    state.active_commands_count,
-                                );
-                            } else {
-                                let stride = std::mem::size_of::<DrawIndirectArgs>() as u64;
-                                for i in 0..state.active_commands_count {
-                                    render_pass
-                                        .draw_indirect(&state.indirect_buffer, i as u64 * stride);
-                                }
-                            }
-                        }
+                        state.render_text(&self.gpu_ctx, self.last_render);
                     }
+
+                    state.render(&self.gpu_ctx, &mut render_pass);
                 }
 
                 // Отправляем записанные команды на выполнение в видеокарту
@@ -586,14 +414,19 @@ impl ApplicationHandler for AppWinit {
                     .hover(self.cursor_position.0, self.cursor_position.1);
 
                 if let Some(state) = self.state.as_mut() {
-                    let fonts = state.glyph_brush.fonts();
+                    let fonts = state.text_vertex.glyph_brush.fonts();
 
                     let layout_context = LayoutContext { fonts: fonts };
-                    self.select_manager.select(
+                    if self.select_manager.select(
                         self.cursor_position.0,
                         self.cursor_position.1,
                         &layout_context,
-                    );
+                    ) {
+                        self.update_layout();
+                        if let Some(w) = &self.window {
+                            w.request_redraw();
+                        }
+                    }
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
@@ -603,7 +436,7 @@ impl ApplicationHandler for AppWinit {
                     let (mx, my) = self.cursor_position;
 
                     if let Some(state) = self.state.as_ref() {
-                        let fonts = state.glyph_brush.fonts();
+                        let fonts = state.text_vertex.glyph_brush.fonts();
 
                         let layout_context = LayoutContext { fonts: fonts };
                         self.select_manager.select_start(
@@ -625,7 +458,7 @@ impl ApplicationHandler for AppWinit {
                 let scroll_amount = match delta {
                     MouseScrollDelta::LineDelta(x, y) => {
                         // y: 1.0 — вверх, -1.0 — вниз.
-                        y * 30.0
+                        y * 10.5
                     }
 
                     MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
@@ -634,7 +467,7 @@ impl ApplicationHandler for AppWinit {
                 // Если прокрутка активна (или тачпад в процессе движения)
                 if phase == TouchPhase::Moved || phase == TouchPhase::Started {
                     let (mx, my) = self.cursor_position;
-                    if self.scroll_manager.scroll(mx, my, 0.0, -scroll_amount) {
+                    if self.scroll_manager.scroll(mx, my, 0.0, scroll_amount) {
                         self.update_layout();
                         if let Some(w) = &self.window {
                             w.request_redraw();
@@ -654,10 +487,10 @@ impl ApplicationHandler for AppWinit {
         self.process_commands();
 
         if let Some(state) = self.state.as_mut() {
-            if !changed && state.last_defrag_time.elapsed() > Duration::from_secs(10) {
+            if !changed && state.text_vertex.last_defrag_time.elapsed() > Duration::from_secs(10) {
                 if state.is_defrag_worth_it() {
                     state.perform_true_defragmentation();
-                    state.last_defrag_time = Instant::now();
+                    state.text_vertex.last_defrag_time = Instant::now();
 
                     // После дефрагментации нужно один раз перерисовать,
                     // так как Indirect Buffer обновился

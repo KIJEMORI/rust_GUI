@@ -26,6 +26,7 @@ pub struct Label {
     pub scale: f32,
     color: u32,
     needs_layout: bool,
+    editable: bool,
     cursor_need: bool,
     cursor: Rect<i16>,
     cursor_index: u32,
@@ -45,6 +46,7 @@ impl Label {
             scale: 20.0,
             color: 0xFF000000,
             needs_layout: true,
+            editable: false,
             cursor_need: false,
             cursor: Rect::default(),
             cursor_index: 0,
@@ -136,6 +138,7 @@ impl Label {
     }
     fn get_index(&self, target_x: f32, scaled_font: PxScaleFont<&FontArc>) -> u32 {
         let rect = &self.panel.base.rect;
+        let offset = self.panel.scroll.get_offset();
         let mut current_x = 0.0;
         let mut last_glyph_id = None;
         let local_x = target_x - rect.x1 as f32;
@@ -207,7 +210,7 @@ impl LabelControl for Label {
         self.select_index_start = self.get_index(select_start.0 as f32, scaled_font);
         self.select_index_end = self.select_index_start;
     }
-    fn set_end_caret(&mut self, select_end: (u16, u16), ctx: &LayoutContext) {
+    fn set_end_caret(&mut self, select_end: (u16, u16), ctx: &LayoutContext) -> bool {
         let font = &ctx.fonts[self.panel.base.settings.font_id.0];
         let scaled_font = font.as_scaled(self.scale);
 
@@ -215,23 +218,36 @@ impl LabelControl for Label {
 
         self.select_index_end = self.get_index(select_end.0 as f32, scaled_font);
 
+        // if let Some(edit) = &mut self.as_edit_label_control_mut() {
+        //     if edit.is_editable() {
+        //         edit.set_cursor();
+        //         edit.on_cursor();
+        //     }
+        // }
+
         if self.select_index_start != self.select_index_end
             && self.select_index_end != last_end_index
         {
             if let Some(tx) = &self.panel.base.settings.command_tx {
                 let _ = tx.send(UiCommand::RequestRedraw());
             }
+            return true;
         }
+        false
     }
 }
 
 impl EditLabelControl for Label {
+    fn is_editable(&self) -> bool {
+        self.editable
+    }
     fn set_cursor(&mut self) {
         self.cursor_need = true;
         self.cursor_index = self.select_index_end;
     }
     fn on_cursor(&mut self) {
         self.cursor_need = true;
+        self.as_with_animation().unwrap().restart_animations();
     }
     fn delete_cursor(&mut self) {
         self.cursor_need = false;
@@ -328,23 +344,34 @@ impl SelectableDrawable for Label {
 }
 
 impl Drawable for Label {
-    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>, offset: (f32, f32)) {
+    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>, offset: (f32, f32), level: u32) {
         if self.panel.base.visible_on_this_frame {
-            self.panel.print(ctx, area, offset);
+            let scroll_val = self.panel.scroll.get_offset();
+            let content_offset = (scroll_val.0 + offset.0, scroll_val.1 + offset.1);
+
+            self.panel.print(ctx, area, offset, level);
+            //let level = level - 1;
 
             let rect = &self.panel.base.rect;
-
-            let mut new_offset = self.panel.scroll.get_offset();
-            new_offset.0 += offset.0;
-            new_offset.1 += offset.1;
+            // ctx.push_rect_sdf(
+            //     rect,
+            //     self.panel.base.settings.background_color,
+            //     offset,
+            //     0.0,
+            //     self.panel.border,
+            //     level,
+            //     false,
+            // );
 
             if self.select_index_start != self.select_index_end {
                 ctx.push_rect_sdf(
                     &self.select_rect,
-                    Some(&area),
                     self.select_color,
-                    new_offset,
+                    offset,
                     5.0,
+                    (0, 0.0),
+                    level,
+                    false,
                 );
             }
 
@@ -354,17 +381,18 @@ impl Drawable for Label {
                 rect.y1 as f32,
                 self.scale,
                 self.color,
-                &rect,
-                Some(&area),
-                new_offset,
+                content_offset,
+                level,
             );
             if self.cursor_need {
                 ctx.push_rect_sdf(
                     &self.cursor,
-                    Some(&area),
                     self.cursor_color,
-                    new_offset,
+                    offset,
                     1.0,
+                    (0, 0.0),
+                    level,
+                    false,
                 );
             }
         }
@@ -382,8 +410,6 @@ impl Drawable for Label {
         let rect = &self.panel.base.rect;
 
         let font = &ctx.fonts[self.panel.base.settings.font_id.0];
-
-       
 
         let scaled_font = font.as_scaled(self.scale);
 
@@ -412,6 +438,13 @@ impl Drawable for Label {
             current_x += scaled_font.h_advance(gid);
             last_id = Some(gid);
         }
+        self.panel
+            .scroll
+            .set_height_width(rect.max.get_height(), current_x as i16);
+        self.panel
+            .scroll
+            .set_slider_height_width(rect.min.get_height(), rect.min.get_width());
+
         let char_count = self.text.chars().count() as u32;
         if self.select_index_start == char_count {
             x_start = current_x;
@@ -433,15 +466,21 @@ impl Drawable for Label {
             self.select_rect = Rect::new_from_coord(first_point, second_point);
         }
 
-        if self.cursor_need {
-            let x_offset = x_cursor;
+        {
+            let offset = self.panel.scroll.get_offset();
+            self.panel
+                .scroll
+                .change_offset_x(rect.min.get_width() as f32 - x_cursor - offset.0);
+
+            let x_offset = x_cursor.min(rect.min.get_width() as f32);
             let x_pos = (rect.x1 as f32 + x_offset) as i16;
 
-            self.cursor = Rect::new_from_coord((x_pos, rect.y1), (x_pos + 1, rect.y2));
+            self.cursor =
+                Rect::new_from_coord((x_pos, rect.y1 as i16), (x_pos + 1, rect.y2 as i16));
         }
 
         self.panel.base.rect.clone()
-        
+
         // let target_w = rect.min.get_width() as f32;
         // let target_h = rect.min.get_height() as f32;
 
@@ -460,6 +499,9 @@ impl Drawable for Label {
         //         self.scale = optimal_scale.min(self.max_scale);
         //     }
         // }
+    }
+    fn under(&self, mx: u16, my: u16) -> bool {
+        self.panel.under(mx, my)
     }
 
     fn hover(&self, mx: u16, my: u16) -> bool {

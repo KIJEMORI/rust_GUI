@@ -45,6 +45,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
 
-    let alpha = textureSample(t_diffuse, s_diffuse, in.uv).r;
-    return vec4<f32>(in.color.rgb, in.color.a * alpha);
+    let alpha = textureSampleLevel(t_diffuse, s_diffuse, in.uv, 0.0).r;
+    let smoothed_alpha = pow(alpha, 1.3);
+
+    if (smoothed_alpha < 0.01) {
+        discard;
+    }
+
+    return vec4<f32>(in.color.rgb, in.color.a * smoothed_alpha);
 }

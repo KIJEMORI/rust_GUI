@@ -138,6 +138,7 @@ where
 
     pub fn set_width(&mut self, w: T) {
         self.max.width = w;
+        self.min.width = w;
     }
 
     pub fn change_width(&mut self, w: T) {
@@ -157,6 +158,7 @@ where
 
     pub fn set_height(&mut self, h: T) {
         self.max.height = h;
+        self.min.height = h;
     }
 
     pub fn change_height(&mut self, h: T) {

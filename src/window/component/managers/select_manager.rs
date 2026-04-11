@@ -59,19 +59,20 @@ impl SelectManager {
             }
         }
     }
-    pub fn select(&mut self, mx: u16, my: u16, ctx: &LayoutContext) {
+    pub fn select(&mut self, mx: u16, my: u16, ctx: &LayoutContext) -> bool {
         if self.select {
             if let Some(item) = &self.selected_element {
                 if let Some(item) = item.upgrade() {
                     let is_still_over = item.borrow().hover(mx, my);
                     if is_still_over {
                         if let Some(label) = item.borrow_mut().as_label_control_mut() {
-                            label.set_end_caret((mx, my), ctx);
+                            return label.set_end_caret((mx, my), ctx);
                         }
                     }
                 }
             }
         }
+        false
     }
     pub fn stop_select(&mut self) {
         self.select = false;

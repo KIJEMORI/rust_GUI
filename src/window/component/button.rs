@@ -34,8 +34,8 @@ impl Button {
 }
 
 impl Drawable for Button {
-    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>, offset: (f32, f32)) {
-        self.label.print(ctx, area, offset);
+    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>, offset: (f32, f32), level: u32) {
+        self.label.print(ctx, area, offset, level);
     }
     fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext, scroll_item: bool) -> Rect<i16> {
         self.label.resize(area, ctx, scroll_item)
@@ -60,6 +60,9 @@ impl Drawable for Button {
     }
     fn set_default_settings(&mut self, settings: &super::base::settings::Settings) {
         self.label.set_default_settings(settings);
+    }
+    fn under(&self, mx: u16, my: u16) -> bool {
+        self.label.under(mx, my)
     }
     fn hover(&self, mx: u16, my: u16) -> bool {
         self.label.hover(mx, my)

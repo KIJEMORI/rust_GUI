@@ -21,6 +21,7 @@ use crate::window::{
     app::App, component::interface::component_control::ComponentControl,
     component::interface::component_control::PanelControl,
 };
+
 fn main() {
     let mut app = App::new();
     let layout = RowLayout::new();
@@ -59,7 +60,7 @@ fn main() {
         label
             .as_panel_control_mut()
             .unwrap()
-            .set_background(0xFFFF0000);
+            .set_background(0xFF00FF00);
         panel.add(label);
     }
 
@@ -69,7 +70,7 @@ fn main() {
         if let Some(hovearable) = panel_hov.borrow_mut().as_hoverable() {
             hovearable.set_on_mouse_enter(UiCommand::ChangeColor(
                 Some(panel_setting.clone()),
-                0xFF00FFFF,
+                0xFF000000,
             ));
         }
 

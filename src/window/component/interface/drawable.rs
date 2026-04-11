@@ -5,6 +5,7 @@ use crate::window::component::base::area::Rect;
 use crate::window::component::base::base::Base;
 
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
+use crate::window::component::base::scroll::Scroll;
 use crate::window::component::base::settings::Settings;
 use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::managers::button_manager::ButtonManager;
@@ -48,6 +49,7 @@ pub trait ScrollableDrawable {
     fn set_offset(&mut self, x: f32, y: f32);
     fn remove_scrolable(&mut self);
     fn scroll(&mut self, x: f32, y: f32) -> bool;
+    fn get_offset(&self) -> &Scroll;
 }
 
 pub trait AnimationDrawable {
@@ -67,7 +69,7 @@ pub trait AnimationDrawable {
 
 #[allow(dead_code)]
 pub trait Drawable: Any {
-    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>, offset: (f32, f32));
+    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>, offset: (f32, f32), level: u32);
     fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext, scroll_item: bool) -> Rect<i16>;
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
@@ -80,6 +82,7 @@ pub trait Drawable: Any {
 
     fn set_default_settings(&mut self, settings: &Settings);
 
+    fn under(&self, mx: u16, my: u16) -> bool;
     fn hover(&self, mx: u16, my: u16) -> bool;
     #[allow(unused_variables)]
     fn get_managers<'a>(
