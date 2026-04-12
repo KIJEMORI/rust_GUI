@@ -1,5 +1,3 @@
-use wgpu_glyph::ab_glyph::{Font, FontArc, PxScaleFont, ScaleFont};
-use wgpu_glyph::{FontId, GlyphPositioner, Layout, SectionGeometry, SectionText};
 use winit::keyboard::SmolStr;
 
 use crate::add_drawable_control;
@@ -28,13 +26,13 @@ pub struct Label {
     needs_layout: bool,
     editable: bool,
     cursor_need: bool,
-    cursor: Rect<i16>,
+    cursor: Rect<f32, u16>,
     cursor_index: u32,
     pub cursor_color: u32,
     select_index_start: u32,
     select_index_end: u32,
     select_color: u32,
-    select_rect: Rect<i16>,
+    select_rect: Rect<f32, u16>,
 }
 
 impl Label {
@@ -71,91 +69,84 @@ impl Label {
         self.panel.set_width(w);
     }
 
-    pub fn calculate_intrinsic_size(&self, font: &FontArc, scale: f32) -> (u16, u16) {
-        use wgpu_glyph::ab_glyph::{Font, ScaleFont};
-
-        let scaled_font = font.as_scaled(scale);
+    pub fn calculate_intrinsic_size(&self, font: &fontdue::Font, scale: f32) -> (u16, u16) {
         let mut width = 0.0;
-        let mut last_glyph_id = None;
 
         for c in self.text.chars() {
-            let glyph_id = scaled_font.glyph_id(c);
-            if let Some(last_id) = last_glyph_id {
-                // Кернинг можно убрать для еще большего ускорения
-                width += scaled_font.kern(last_id, glyph_id);
-            }
-            width += scaled_font.h_advance(glyph_id);
-            last_glyph_id = Some(glyph_id);
+            let metrics = font.metrics(c, scale);
+            width += metrics.advance_width;
         }
 
-        let height = scaled_font.ascent() - scaled_font.descent();
-        (width.ceil() as u16, height.ceil() as u16)
-    }
+        if let Some(line_metrics) = font.horizontal_line_metrics(scale) {
+            let height = line_metrics.ascent - line_metrics.descent;
 
-    pub fn calculate_wrapped_size(&self, font: &FontArc, scale: f32, max_width: f32) -> (u16, u16) {
-        let layout = Layout::default();
+            // Если хочешь еще плотнее (без учета "запаса" под ударения),
+            // можно использовать только ascent:
+            //let height = line_metrics.ascent;
 
-        let text = SectionText {
-            text: &self.text,
-            scale: scale.into(),
-            font_id: FontId(0),
-        };
-
-        let fonts = &[font];
-        let glyphs = layout.calculate_glyphs(
-            fonts,
-            &SectionGeometry {
-                screen_position: (0.0, 0.0),
-                bounds: (max_width, f32::INFINITY),
-            },
-            &[text],
-        );
-
-        let mut min_x = 0.0;
-        let mut max_x = 0.0;
-        let mut min_y = 0.0;
-        let mut max_y = 0.0;
-
-        for glyph in glyphs {
-            let pos = glyph.glyph.position;
-
-            max_x = (max_x as f32).max(pos.x as f32);
-            max_y = (max_y as f32).max(pos.y as f32);
+            (width.ceil() as u16, height.ceil() as u16)
+        } else {
+            // Fallback если шрифт сломан
+            (width.ceil() as u16, scale.ceil() as u16)
         }
-
-        let scaled_font = font.as_scaled(scale);
-        let line_height = scaled_font.ascent() - scaled_font.descent();
-
-        (max_x.ceil() as u16, (max_y + line_height).ceil() as u16)
     }
+
+    // pub fn calculate_wrapped_size(&self, font: &FontArc, scale: f32, max_width: f32) -> (u16, u16) {
+    //     let layout = Layout::default();
+
+    //     let text = SectionText {
+    //         text: &self.text,
+    //         scale: scale.into(),
+    //         font_id: FontId(0),
+    //     };
+
+    //     let fonts = &[font];
+    //     let glyphs = layout.calculate_glyphs(
+    //         fonts,
+    //         &SectionGeometry {
+    //             screen_position: (0.0, 0.0),
+    //             bounds: (max_width, f32::INFINITY),
+    //         },
+    //         &[text],
+    //     );
+
+    //     let mut min_x = 0.0;
+    //     let mut max_x = 0.0;
+    //     let mut min_y = 0.0;
+    //     let mut max_y = 0.0;
+
+    //     for glyph in glyphs {
+    //         let pos = glyph.glyph.position;
+
+    //         max_x = (max_x as f32).max(pos.x as f32);
+    //         max_y = (max_y as f32).max(pos.y as f32);
+    //     }
+
+    //     let scaled_font = font.as_scaled(scale);
+    //     let line_height = scaled_font.ascent() - scaled_font.descent();
+
+    //     (max_x.ceil() as u16, (max_y + line_height).ceil() as u16)
+    // }
 
     fn set_max_size(&mut self, ctx: &LayoutContext) {
-        let font = &ctx.fonts[self.panel.base.settings.font_id.0];
-
-        let (w, h) = self.calculate_intrinsic_size(&font, self.max_scale);
+        let (w, h) = self.calculate_intrinsic_size(ctx.font, self.max_scale);
         self.panel.set_width(w);
         self.panel.set_height(h);
     }
-    fn get_index(&self, target_x: f32, scaled_font: PxScaleFont<&FontArc>) -> u32 {
-        let rect = &self.panel.base.rect;
-        let offset = self.panel.scroll.get_offset();
-        let mut current_x = 0.0;
-        let mut last_glyph_id = None;
-        let local_x = target_x - rect.x1 as f32;
+    fn get_index(&self, target_x: f32, font: &fontdue::Font, scale: f32) -> u32 {
+        let mut current_x = self.panel.base.rect.x1;
 
         for (i, c) in self.text.chars().enumerate() {
-            let glyph_id = scaled_font.glyph_id(c);
-            if let Some(last_id) = last_glyph_id {
-                current_x += scaled_font.kern(last_id, glyph_id);
-            }
-            let advance = scaled_font.h_advance(glyph_id);
+            let metrics = font.metrics(c, scale);
+            let char_width = metrics.advance_width;
 
-            if local_x < current_x + advance / 2.0 {
+            // Если кликнули в левую половину символа — индекс до него, если в правую — после
+            if target_x < current_x + char_width / 2.0 {
                 return i as u32;
             }
-            current_x += advance;
-            last_glyph_id = Some(glyph_id);
+            current_x += char_width;
         }
+
         self.text.chars().count() as u32
     }
     fn char_to_byte_idx(&self, char_idx: u32) -> u32 {
@@ -204,26 +195,14 @@ impl LabelControl for Label {
         }
     }
     fn set_start_caret(&mut self, select_start: (u16, u16), ctx: &LayoutContext) {
-        let font = &ctx.fonts[self.panel.base.settings.font_id.0];
-        let scaled_font = font.as_scaled(self.scale);
-
-        self.select_index_start = self.get_index(select_start.0 as f32, scaled_font);
+        // Вычисляем индекс символа под курсором мыши
+        self.select_index_start = self.get_index(select_start.0 as f32, ctx.font, self.scale);
         self.select_index_end = self.select_index_start;
+        self.cursor_index = self.select_index_start; // Не забудь про индекс курсора
     }
     fn set_end_caret(&mut self, select_end: (u16, u16), ctx: &LayoutContext) -> bool {
-        let font = &ctx.fonts[self.panel.base.settings.font_id.0];
-        let scaled_font = font.as_scaled(self.scale);
-
         let last_end_index = self.select_index_end;
-
-        self.select_index_end = self.get_index(select_end.0 as f32, scaled_font);
-
-        // if let Some(edit) = &mut self.as_edit_label_control_mut() {
-        //     if edit.is_editable() {
-        //         edit.set_cursor();
-        //         edit.on_cursor();
-        //     }
-        // }
+        self.select_index_end = self.get_index(select_end.0 as f32, ctx.font, self.scale);
 
         if self.select_index_start != self.select_index_end
             && self.select_index_end != last_end_index
@@ -344,13 +323,12 @@ impl SelectableDrawable for Label {
 }
 
 impl Drawable for Label {
-    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>, offset: (f32, f32), level: u32) {
+    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<f32, u16>, level: u32) {
         if self.panel.base.visible_on_this_frame {
-            let scroll_val = self.panel.scroll.get_offset();
-            let content_offset = (scroll_val.0 + offset.0, scroll_val.1 + offset.1);
-
-            self.panel.print(ctx, area, offset, level);
+            self.panel.print(ctx, area, level);
             //let level = level - 1;
+
+            let content_level = level + 1;
 
             let rect = &self.panel.base.rect;
             // ctx.push_rect_sdf(
@@ -364,41 +342,27 @@ impl Drawable for Label {
             // );
 
             if self.select_index_start != self.select_index_end {
-                ctx.push_rect_sdf(
-                    &self.select_rect,
-                    self.select_color,
-                    offset,
-                    5.0,
-                    (0, 0.0),
-                    level,
-                    false,
-                );
+                let mut select_rect = self.select_rect.clone();
+                select_rect.set_position(select_rect.x1, rect.y1);
+
+                ctx.push_rect_sdf(&select_rect, self.select_color, 5.0, (0, 0.0), level, false);
             }
 
-            ctx.push_text(
-                &self.text,
-                rect.x1 as f32,
-                rect.y1 as f32,
-                self.scale,
-                self.color,
-                content_offset,
-                level,
-            );
+            ctx.push_text(&self.text, rect.x1, rect.y1, self.scale, self.color, level);
             if self.cursor_need {
-                ctx.push_rect_sdf(
-                    &self.cursor,
-                    self.cursor_color,
-                    offset,
-                    1.0,
-                    (0, 0.0),
-                    level,
-                    false,
-                );
+                let mut cursor_rect = self.cursor.clone();
+                cursor_rect.set_position(cursor_rect.x1, rect.y1);
+                ctx.push_rect_sdf(&cursor_rect, self.cursor_color, 1.0, (0, 0.0), level, false);
             }
         }
     }
 
-    fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext, scroll_item: bool) -> Rect<i16> {
+    fn resize(
+        &mut self,
+        area: &Rect<f32, u16>,
+        ctx: &LayoutContext,
+        scroll_item: bool,
+    ) -> Rect<f32, u16> {
         if self.needs_layout {
             self.set_max_size(ctx);
 
@@ -407,13 +371,14 @@ impl Drawable for Label {
 
         self.panel.resize(area, ctx, scroll_item);
 
-        let rect = &self.panel.base.rect;
+        let rect = &mut self.panel.base.rect;
 
-        let font = &ctx.fonts[self.panel.base.settings.font_id.0];
+        let scale_factor = self.scale / ctx.sdf_base_size;
 
-        let scaled_font = font.as_scaled(self.scale);
+        let line_metrics = ctx.font.horizontal_line_metrics(ctx.sdf_base_size).unwrap();
+        let text_height = (line_metrics.ascent - line_metrics.descent) * scale_factor;
 
-        let mut last_id = None;
+        //let mut last_id = None;
         let mut current_x = 0.0;
         let mut x_start = 0.0;
         let mut x_end = 0.0;
@@ -431,19 +396,14 @@ impl Drawable for Label {
                 x_cursor = current_x;
             }
 
-            let gid = scaled_font.glyph_id(c);
-            if let Some(l) = last_id {
-                current_x += scaled_font.kern(l, gid);
-            }
-            current_x += scaled_font.h_advance(gid);
-            last_id = Some(gid);
+            let metrics = ctx.font.metrics(c, ctx.sdf_base_size);
+
+            current_x += metrics.advance_width * scale_factor;
         }
-        self.panel
-            .scroll
-            .set_height_width(rect.max.get_height(), current_x as i16);
-        self.panel
-            .scroll
-            .set_slider_height_width(rect.min.get_height(), rect.min.get_width());
+        if let Some(scroll) = &mut self.panel.scroll {
+            scroll.set_height_width(text_height as u16, current_x as u16);
+            scroll.set_slider_height_width(rect.min.get_height(), rect.min.get_width());
+        }
 
         let char_count = self.text.chars().count() as u32;
         if self.select_index_start == char_count {
@@ -458,25 +418,27 @@ impl Drawable for Label {
 
         if self.select_index_start != self.select_index_end {
             let x1_offset = x_start;
-            let x2_offset = x_end;
+            let x2_offset = x_end.min(rect.get_x2());
 
-            let first_point = ((rect.x1 as f32 + x1_offset.min(x2_offset)) as i16, rect.y1);
-            let second_point = ((rect.x1 as f32 + x1_offset.max(x2_offset)) as i16, rect.y2);
+            let first_point = ((rect.x1 as f32 + x1_offset.min(x2_offset)), rect.y1);
+            let second_point = ((rect.x1 as f32 + x1_offset.max(x2_offset)), rect.get_y2());
 
             self.select_rect = Rect::new_from_coord(first_point, second_point);
         }
 
         {
-            let offset = self.panel.scroll.get_offset();
-            self.panel
-                .scroll
-                .change_offset_x(rect.min.get_width() as f32 - x_cursor - offset.0);
+            let x_offset = x_cursor;
+            let x_pos = rect.x1 as f32 + x_offset;
 
-            let x_offset = x_cursor.min(rect.min.get_width() as f32);
-            let x_pos = (rect.x1 as f32 + x_offset) as i16;
+            let x2 = rect.get_x2();
 
-            self.cursor =
-                Rect::new_from_coord((x_pos, rect.y1 as i16), (x_pos + 1, rect.y2 as i16));
+            if x_pos > x2 {
+                rect.set_position(x2 - x_pos, rect.y1);
+            }
+
+            let x_pos = (x_pos).min(x2 - 1.0);
+
+            self.cursor = Rect::new_from_coord((x_pos, rect.y1), (x_pos + 1.0, rect.get_y2()));
         }
 
         self.panel.base.rect.clone()

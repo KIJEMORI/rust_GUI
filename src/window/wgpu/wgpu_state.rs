@@ -6,12 +6,16 @@ use wgpu::{
 };
 
 use crate::window::{
-    component::base::gpu_render_context::{GpuCommand, GpuRenderContext},
+    component::{
+        base::gpu_render_context::{GpuCommand, GpuRenderContext},
+        managers::atlas_manager::AtlasManager,
+    },
     wgpu::{
         draw_args::{DrawIndexedIndirectArgs, DrawIndirectArgs},
         screen_uniform::{ScreenUniform, ScrollData},
         shape_vertex::GPUShapeVertex,
         text_vertex::{GPUTextVertex, TextVertex},
+        uber_resourse_manager::UberResourceManager,
     },
 };
 pub struct WgpuState {
@@ -24,12 +28,12 @@ pub struct WgpuState {
     pub shape_vertex: GPUShapeVertex,
     pub text_vertex: GPUTextVertex,
     pub uniform_buffer: wgpu::Buffer,
-    pub scroll_storage_buffer: wgpu::Buffer,
     pub depth_stencil_view: TextureView,
+    uber_manager: UberResourceManager,
 }
 
 pub const MAX_VERTICES: u64 = 36_000;
-pub const MAX_INDICES: u64 = 36_000;
+pub const MAX_INDICES: u64 = MAX_VERTICES * 2;
 
 impl WgpuState {
     pub fn new(
@@ -48,24 +52,14 @@ impl WgpuState {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let initial_offsets = vec![
-            ScrollData {
-                offsets: [0.0, 0.0, 0.0, 0.0]
-            };
-            100
-        ];
+        let text_vertex = GPUTextVertex::new(&device, &config, &uniform_buffer);
 
-        let scroll_storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Scroll Storage Buffer"),
-            contents: bytemuck::cast_slice(&initial_offsets),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let shape_vertex =
-            GPUShapeVertex::new(&device, &config, &uniform_buffer, &scroll_storage_buffer);
-
-        let text_vertex =
-            GPUTextVertex::new(&device, &config, &uniform_buffer, &scroll_storage_buffer);
+        let shape_vertex = GPUShapeVertex::new(
+            &device,
+            &config,
+            &uniform_buffer,
+            &text_vertex.text_bind_group_layout,
+        );
 
         let depth_stencil_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Depth Stencil"),
@@ -84,6 +78,8 @@ impl WgpuState {
         let depth_stencil_view =
             depth_stencil_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
+        let uber_manager = UberResourceManager::new(&device, &config);
+
         Self {
             //Base
             surface: surface,
@@ -93,8 +89,8 @@ impl WgpuState {
             shape_vertex: shape_vertex,
             text_vertex: text_vertex,
             uniform_buffer: uniform_buffer,
-            scroll_storage_buffer: scroll_storage_buffer,
             depth_stencil_view: depth_stencil_view,
+            uber_manager: uber_manager,
         }
     }
 
@@ -134,20 +130,43 @@ impl WgpuState {
     //         );
     //     }
     // }
+    //
+    pub fn prepare_gpu_data(&mut self, gpu_ctx: &mut GpuRenderContext) {
+        self.uber_manager.start_frame(); // Обнулили active_shape_count
 
-    pub fn update_shape_indirect_buffer(&mut self, offsets: &[Range<usize>]) {
+        // 1. Сначала шейпы пишут свои команды в буфер (с 0-го индекса)
+        // Это обновит uber_manager.active_shape_count до актуального значения
         self.shape_vertex
-            .update_shape_indirect_buffer(offsets, &self.device, &self.queue);
-    }
+            .render(gpu_ctx, &self.device, &self.queue, &mut self.uber_manager);
 
-    pub fn ensure_gpu_capacity(&mut self, required_count: usize) {
-        self.text_vertex
-            .ensure_gpu_capacity(required_count, &self.device, &self.queue);
-    }
+        let shapes_base_idx = self.uber_manager.active_shape_count;
 
-    pub fn update_section_direct_gpu(&mut self, s_idx: usize, new_verts: Vec<TextVertex>) {
-        self.text_vertex
-            .update_section_direct_gpu(s_idx, new_verts, &self.device, &self.queue);
+        // 2. АКТУАЛИЗИРУЕМ индексы для команд отрисовки.
+        // Проходим по всем командам в том порядке, в котором они будут рисоваться.
+        let mut shape_counter = 0;
+        let mut text_counter = 0;
+        for cmd in &mut gpu_ctx.command_sections {
+            match cmd {
+                GpuCommand::Shape(s) => {
+                    s.command_index = shape_counter;
+                    shape_counter += 1;
+                }
+                GpuCommand::Text(s) => {
+                    // Текст всегда идет строго после всех шейпов (включая селект)
+                    s.command_index = shapes_base_idx + text_counter;
+                    text_counter += 1;
+                }
+            }
+        }
+
+        // 3. Теперь текст пишет свои команды по правильному адресу
+        self.text_vertex.render(
+            gpu_ctx,
+            &self.device,
+            &self.queue,
+            &mut self.uber_manager,
+            shapes_base_idx,
+        );
     }
 
     // pub fn defragment_if_needed(&mut self) -> bool {
@@ -169,120 +188,168 @@ impl WgpuState {
     //     false
     // }
 
-    pub fn update_indirect_buffer(&mut self) {
-        self.text_vertex
-            .update_indirect_buffer(&self.device, &self.queue);
-    }
+    // pub fn is_defrag_worth_it(&self) -> bool {
+    //     self.text_vertex.is_defrag_worth_it()
+    // }
 
-    pub fn is_defrag_worth_it(&self) -> bool {
-        self.text_vertex.is_defrag_worth_it()
-    }
+    // pub fn perform_true_defragmentation(&mut self) {
+    //     self.text_vertex.perform_true_defragmentation(
+    //         &self.device,
+    //         &self.queue,
+    //         &mut self.uber_manager,
+    //         0,
+    //     );
+    // }
 
-    pub fn perform_true_defragmentation(&mut self) {
-        self.text_vertex
-            .perform_true_defragmentation(&self.device, &self.queue);
-    }
+    // pub fn render(&mut self, gpu_ctx: &GpuRenderContext, render_pass: &mut RenderPass<'_>) {
+    //     const STRIDE: u64 = std::mem::size_of::<wgpu::util::DrawIndexedIndirectArgs>() as u64;
 
-    pub fn render_shape(&mut self, gpu_ctx: &GpuRenderContext) {
-        self.shape_vertex.render(gpu_ctx, &self.device, &self.queue);
-    }
+    //     let use_multi_draw = self
+    //         .device
+    //         .features()
+    //         .contains(wgpu::Features::MULTI_DRAW_INDIRECT);
 
-    pub fn render_text(&mut self, gpu_ctx: &GpuRenderContext, last_render: Instant) {
-        self.text_vertex
-            .render(gpu_ctx, last_render, &self.device, &self.queue);
-    }
+    //     render_pass.set_vertex_buffer(0, self.uber_manager.vertex_buffer.slice(..));
+    //     render_pass.set_index_buffer(
+    //         self.uber_manager.index_buffer.slice(..),
+    //         wgpu::IndexFormat::Uint32,
+    //     );
 
+    //     // Биндим группы один раз, если они общие
+    //     render_pass.set_bind_group(0, &self.shape_vertex.bind_group, &[]);
+    //     render_pass.set_bind_group(1, &self.text_vertex.text_bind_group, &[]);
+
+    //     let mut i = 0;
+    //     let commands = &gpu_ctx.command_sections;
+
+    //     while i < commands.len() {
+    //         let (level, is_mask, start_cmd_idx) = match &commands[i] {
+    //             GpuCommand::Shape(s) | GpuCommand::Text(s) => (s.level, s.is_mask, s.command_index),
+    //         };
+
+    //         if is_mask {
+    //             render_pass.set_pipeline(&self.shape_vertex.mask_pipeline);
+    //             render_pass.set_stencil_reference(level - 1);
+    //         } else {
+    //             render_pass.set_pipeline(&self.shape_vertex.content_pipeline);
+    //             render_pass.set_stencil_reference(level);
+    //         }
+
+    //         if use_multi_draw {
+    //             let mut batch_count = 0;
+    //             let mut j = i;
+
+    //             while j < commands.len() {
+    //                 let (next_level, next_is_mask) = match &commands[j] {
+    //                     GpuCommand::Shape(s) | GpuCommand::Text(s) => (s.level, s.is_mask),
+    //                 };
+
+    //                 // Группируем всё, что имеет один уровень и тип маски
+    //                 if next_level == level && next_is_mask == is_mask {
+    //                     batch_count += 1;
+    //                     j += 1;
+    //                 } else {
+    //                     break;
+    //                 }
+    //             }
+
+    //             let offset = start_cmd_idx as u64 * STRIDE;
+    //             render_pass.multi_draw_indexed_indirect(
+    //                 &self.uber_manager.indirect_buffer,
+    //                 offset,
+    //                 batch_count,
+    //             );
+    //             i = j;
+    //         } else {
+    //             let offset = start_cmd_idx as u64 * STRIDE;
+    //             render_pass.draw_indexed_indirect(&self.uber_manager.indirect_buffer, offset);
+    //             i += 1;
+    //         }
+    //     }
+    // }
+    //
     pub fn render(&mut self, gpu_ctx: &GpuRenderContext, render_pass: &mut RenderPass<'_>) {
+        const STRIDE: u64 = 20;
+        let use_multi_draw = self
+            .device
+            .features()
+            .contains(wgpu::Features::MULTI_DRAW_INDIRECT);
+
+        render_pass.set_vertex_buffer(0, self.uber_manager.vertex_buffer.slice(..));
         render_pass.set_index_buffer(
-            self.shape_vertex.vertex_index_buffer.slice(..),
+            self.uber_manager.index_buffer.slice(..),
             wgpu::IndexFormat::Uint32,
         );
+        render_pass.set_bind_group(0, &self.shape_vertex.bind_group, &[]);
+        render_pass.set_bind_group(1, &self.text_vertex.text_bind_group, &[]);
 
-        let shape_stride = std::mem::size_of::<DrawIndexedIndirectArgs>() as u64;
-        let text_stride = std::mem::size_of::<DrawIndirectArgs>() as u64;
+        let mut i = 0;
+        let mut shape_counter = 0;
+        let mut text_counter = 0;
+        let shapes_base = gpu_ctx.shape_section_offsets.len() as u32;
 
-        let mut last_pipeline_is_mask: Option<bool> = None;
+        let commands = &gpu_ctx.command_sections;
 
-        render_pass.set_pipeline(&self.shape_vertex.mask_pipeline);
+        while i < commands.len() {
+            let (level, is_mask, is_text) = match &commands[i] {
+                GpuCommand::Shape(s) => (s.level, s.is_mask, false),
+                GpuCommand::Text(s) => (s.level, s.is_mask, true),
+            };
 
-        for cmd in &gpu_ctx.command_sections {
-            match cmd {
-                GpuCommand::Shape(section) => {
-                    render_pass.set_vertex_buffer(0, self.shape_vertex.vertex_buffer.slice(..));
-                    render_pass.set_bind_group(0, &self.shape_vertex.bind_group, &[]);
+            if is_mask {
+                render_pass.set_pipeline(&self.shape_vertex.mask_pipeline);
+                render_pass.set_stencil_reference(level.saturating_sub(1));
+            } else {
+                render_pass.set_pipeline(&self.shape_vertex.content_pipeline);
+                render_pass.set_stencil_reference(level);
+            }
 
-                    if section.is_mask {
-                        if last_pipeline_is_mask != Some(true) {
-                            render_pass.set_pipeline(&self.shape_vertex.mask_pipeline);
-                        }
-                        render_pass.set_stencil_reference(section.level - 1);
-                        // Заполняем трафарет
-                    } else {
-                        if last_pipeline_is_mask != Some(false) {
-                            render_pass.set_pipeline(&self.shape_vertex.content_pipeline);
-                        }
-                        render_pass.set_stencil_reference(section.level);
+            let mut batch_count = 0;
+            let mut j = i;
+            while j < commands.len() {
+                let matches = match &commands[j] {
+                    GpuCommand::Shape(s) => s.level == level && s.is_mask == is_mask && !is_text,
+                    GpuCommand::Text(s) => s.level == level && s.is_mask == is_mask && is_text,
+                };
 
-                        // Рисуем контент (он автоматически обрежется)
-                    }
-                    last_pipeline_is_mask = Some(section.is_mask);
-                    // Меняем уровень трафарета ОДИН раз для всей группы
-
-                    if self
-                        .device
-                        .features()
-                        .contains(wgpu::Features::MULTI_DRAW_INDIRECT)
-                    {
-                        // Рисуем всю группу команд одним вызовом
-                        render_pass.multi_draw_indexed_indirect(
-                            &self.shape_vertex.shape_indirect_buffer,
-                            section.command_index as u64 * shape_stride,
-                            section.command_count,
-                        );
-                    } else {
-                        // Fallback: рисуем каждую команду в группе по отдельности
-                        for i in 0..section.command_count {
-                            let offset = (section.command_index + i) as u64 * shape_stride;
-                            render_pass.draw_indexed_indirect(
-                                &self.shape_vertex.shape_indirect_buffer,
-                                offset,
-                            );
-                        }
-                    }
-                }
-                GpuCommand::Text(section) => {
-                    last_pipeline_is_mask = None;
-                    if self.text_vertex.active_commands_count > 0 {
-                        render_pass.set_pipeline(&self.text_vertex.text_pipeline);
-                        render_pass.set_bind_group(0, &self.text_vertex.bind_group, &[]);
-                        render_pass.set_bind_group(1, &self.text_vertex.text_bind_group, &[]);
-                        render_pass
-                            .set_vertex_buffer(0, self.text_vertex.text_vertex_buffer.slice(..));
-
-                        // Идем по группам текста, разделенным по уровням вложенности
-                        // Устанавливаем уровень трафарета для этого блока текста
-                        render_pass.set_stencil_reference(section.level);
-
-                        if self
-                            .device
-                            .features()
-                            .contains(wgpu::Features::MULTI_DRAW_INDIRECT)
-                        {
-                            render_pass.multi_draw_indirect(
-                                &self.text_vertex.indirect_buffer,
-                                section.command_index as u64 * text_stride,
-                                section.command_count,
-                            );
-                        } else {
-                            for i in 0..section.command_count {
-                                let offset = (section.command_index + i) as u64 * text_stride;
-                                render_pass
-                                    .draw_indirect(&self.text_vertex.indirect_buffer, offset);
-                            }
-                        }
-                    }
+                if matches {
+                    batch_count += 1;
+                    j += 1;
+                } else {
+                    break;
                 }
             }
+
+            // 3. Отрисовка
+            let start_idx = if is_text {
+                shapes_base + text_counter
+            } else {
+                shape_counter
+            };
+            let offset = start_idx as u64 * STRIDE;
+
+            if use_multi_draw && batch_count > 1 {
+                render_pass.multi_draw_indexed_indirect(
+                    &self.uber_manager.indirect_buffer,
+                    offset,
+                    batch_count,
+                );
+            } else {
+                // Если фича выключена или в батче всего 1 элемент, рисуем по старинке
+                for k in 0..batch_count {
+                    let single_offset = (start_idx + k) as u64 * STRIDE;
+                    render_pass
+                        .draw_indexed_indirect(&self.uber_manager.indirect_buffer, single_offset);
+                }
+            }
+
+            // Обновляем глобальные счетчики
+            if is_text {
+                text_counter += batch_count;
+            } else {
+                shape_counter += batch_count;
+            }
+            i = j;
         }
     }
 
@@ -309,8 +376,13 @@ impl WgpuState {
             let depth_stencil_view =
                 depth_stencil_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-            // ОБНОВЛЯЕМ ТРАФАРЕТ ТУТ
             self.depth_stencil_view = depth_stencil_view
         }
     }
+}
+
+#[derive(PartialEq)]
+enum PipelineType {
+    Shape,
+    Text,
 }

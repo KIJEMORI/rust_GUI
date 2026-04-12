@@ -46,10 +46,9 @@ pub trait SelectableDrawable {
 pub trait ScrollableDrawable {
     fn is_scrollable(&self) -> bool;
     fn set_scrolable(&mut self);
-    fn set_offset(&mut self, x: f32, y: f32);
+    fn set_offset(&mut self, x: f32, y: f32, area: &Rect<f32, u16>);
     fn remove_scrolable(&mut self);
-    fn scroll(&mut self, x: f32, y: f32) -> bool;
-    fn get_offset(&self) -> &Scroll;
+    fn scroll(&mut self, x: f32, y: f32);
 }
 
 pub trait AnimationDrawable {
@@ -69,8 +68,13 @@ pub trait AnimationDrawable {
 
 #[allow(dead_code)]
 pub trait Drawable: Any {
-    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>, offset: (f32, f32), level: u32);
-    fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext, scroll_item: bool) -> Rect<i16>;
+    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<f32, u16>, level: u32);
+    fn resize(
+        &mut self,
+        area: &Rect<f32, u16>,
+        ctx: &LayoutContext,
+        scroll_item: bool,
+    ) -> Rect<f32, u16>;
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 

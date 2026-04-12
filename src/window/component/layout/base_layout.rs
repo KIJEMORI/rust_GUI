@@ -41,12 +41,12 @@ impl Layout for BaseLayout {
     fn set_const_layout(&mut self, const_layout: Option<Box<dyn ConstLayout>>) {
         self.const_layout = const_layout
     }
-    fn calculate(&self, area: &Rect<i16>, parent_area: &Rect<i16>) -> Rect<i16> {
+    fn calculate(&self, area: &Rect<f32, u16>, parent_area: &Rect<f32, u16>) -> Rect<f32, u16> {
         let mut area = area.clone();
 
         area.set_position(
-            parent_area.x1 + self.margin.left,
-            parent_area.y1 + self.margin.up,
+            (parent_area.x1 + self.margin.left as f32).round(),
+            (parent_area.y1 + self.margin.up as f32).round(),
         );
 
         if let Some(const_layout) = &self.const_layout {
@@ -54,34 +54,34 @@ impl Layout for BaseLayout {
                 area.max.get_width() as u16,
                 parent_area.min.get_width() as u16,
             );
-            area.set_width(width as i16);
+            area.set_width(width);
 
             let height = const_layout.as_ref().get_height(
                 area.max.get_height() as u16,
                 parent_area.min.get_height() as u16,
             );
-            area.set_height(height as i16);
+            area.set_height(height);
         }
 
         return area;
     }
 
-    fn decrease(&self, area: &Rect<i16>, parent_area: &Rect<i16>) -> Rect<i16> {
+    fn decrease(&self, area: &Rect<f32, u16>, parent_area: &Rect<f32, u16>) -> Rect<f32, u16> {
         let mut area = area.clone();
 
-        let x_offset = area.get_x_offset() + self.margin.right;
-        let parent_x_offset = parent_area.x2;
+        let x_offset = area.get_x_offset() + self.margin.right as f32;
+        let parent_x_offset = parent_area.get_x2();
 
         // Если смещение больше чем данная область отрисовки уменьшаем размер отрисовки текущей структуры
         if x_offset > parent_x_offset {
-            area.change_width_on_coord(parent_x_offset - self.margin.right);
+            area.change_width_on_coord(parent_x_offset - self.margin.right as f32);
         } else {
             area.change_width(area.max.get_width().min(parent_area.min.get_width()));
         }
 
         // Всё то же самое но для высоты
         let y_offset = area.get_y_offset();
-        let parent_y_offset = parent_area.y2;
+        let parent_y_offset = parent_area.get_y2();
 
         if y_offset > parent_y_offset {
             area.change_height_on_coord(parent_y_offset);
@@ -91,20 +91,20 @@ impl Layout for BaseLayout {
 
         return area;
     }
-    fn padding_area(&self, area: &Rect<i16>) -> Rect<i16> {
-        let x1 = area.x1 + self.padding.left;
-        let y1 = area.y1 + self.padding.up;
-        let x2 = area.x2 - self.padding.right;
-        let y2 = area.y2 - self.padding.down;
+    fn padding_area(&self, area: &Rect<f32, u16>) -> Rect<f32, u16> {
+        let x1 = area.x1 + self.padding.left as f32;
+        let y1 = area.y1 + self.padding.up as f32;
+        let x2 = area.get_x2() - self.padding.right as f32;
+        let y2 = area.get_y2() - self.padding.down as f32;
 
         Rect::new_from_coord((x1, y1), (x2, y2))
     }
     fn next(
         &self,
-        _area: &Rect<i16>,
-        parent_area: &Rect<i16>,
+        _area: &Rect<f32, u16>,
+        parent_area: &Rect<f32, u16>,
         _margin: Direction,
-    ) -> (Rect<i16>, bool) {
+    ) -> (Rect<f32, u16>, bool) {
         (
             Rect::new(
                 parent_area.x1,

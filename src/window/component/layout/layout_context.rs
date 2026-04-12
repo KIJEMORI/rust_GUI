@@ -1,6 +1,5 @@
-use wgpu_glyph::ab_glyph::FontArc;
-
 pub struct LayoutContext<'a> {
-    pub fonts: &'a [FontArc],
-    // тут могут быть еще DPI или настройки интервалов
+    pub font: &'a fontdue::Font,
+    // Базовый размер, при котором генерировался SDF (например, 64.0)
+    pub sdf_base_size: f32,
 }

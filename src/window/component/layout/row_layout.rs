@@ -35,33 +35,33 @@ impl Layout for RowLayout {
         self.base.set_const_layout(const_layout);
     }
 
-    fn calculate(&self, area: &Rect<i16>, parent_area: &Rect<i16>) -> Rect<i16> {
+    fn calculate(&self, area: &Rect<f32, u16>, parent_area: &Rect<f32, u16>) -> Rect<f32, u16> {
         self.base.calculate(area, parent_area)
     }
-    fn padding_area(&self, area: &Rect<i16>) -> Rect<i16> {
+    fn padding_area(&self, area: &Rect<f32, u16>) -> Rect<f32, u16> {
         self.base.padding_area(area)
     }
     fn next(
         &self,
-        area: &Rect<i16>,
-        parent_area: &Rect<i16>,
+        area: &Rect<f32, u16>,
+        parent_area: &Rect<f32, u16>,
         margin: Direction,
-    ) -> (Rect<i16>, bool) {
+    ) -> (Rect<f32, u16>, bool) {
         let offset_x = margin.left;
         let offset_y = margin.down;
 
-        let x1 = if parent_area.x1 > offset_x {
-            parent_area.x1 - offset_x.max(0)
+        let x1 = if parent_area.x1 > offset_x as f32 {
+            parent_area.x1 - offset_x.max(0) as f32
         } else {
-            0
+            0.0
         };
-        let y1 = area.y2 + offset_y.max(0);
-        let x2 = parent_area.x2;
-        let y2 = parent_area.y2;
+        let y1 = area.get_y2() + offset_y.max(0) as f32;
+        let x2 = parent_area.get_x2();
+        let y2 = parent_area.get_y2();
 
         (Rect::new_from_coord((x1, y1), (x2, y2)), y1 < y2)
     }
-    fn decrease(&self, area: &Rect<i16>, parent_area: &Rect<i16>) -> Rect<i16> {
+    fn decrease(&self, area: &Rect<f32, u16>, parent_area: &Rect<f32, u16>) -> Rect<f32, u16> {
         self.base.decrease(area, parent_area)
     }
 }

@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use crate::add_drawable_control;
 use crate::window::component::animation::animation_action::AnimationSequence;
-use crate::window::component::base::area::Rect;
+use crate::window::component::base::area::{self, Rect};
 use crate::window::component::base::base::Base;
 use crate::window::component::base::component_type::SharedDrawable;
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
@@ -30,8 +30,7 @@ pub struct Panel {
     childs: Vec<SharedDrawable>,
     pub base: Base,
     layout: Box<dyn Layout>,
-    scrollable: bool,
-    pub scroll: Scroll,
+    pub scroll: Option<Scroll>,
     on_click: Option<UiCommand>,
     on_mouse_enter: Option<UiCommand>,
     on_mouse_leave: Option<UiCommand>,
@@ -41,7 +40,7 @@ pub struct Panel {
 
 #[allow(dead_code)]
 impl Panel {
-    pub fn set_position(&mut self, x: i16, y: i16) {
+    pub fn set_position(&mut self, x: f32, y: f32) {
         self.base.set_position(x, y);
     }
     pub fn set_height(&mut self, h: u16) {
@@ -72,19 +71,18 @@ impl Panel {
 
 impl Default for Panel {
     fn default() -> Panel {
-        let base = Base::new("Panel".to_string(), Rect::new(0, 0, 0, 0));
+        let base = Base::new("Panel".to_string(), Rect::new(0.0, 0.0, 0, 0));
 
         Panel {
             childs: Vec::new(),
             base: base,
             layout: BaseLayout::new(),
-            scrollable: false,
-            scroll: Scroll::default(),
+            scroll: None,
             on_click: None,
             on_mouse_enter: None,
             on_mouse_leave: None,
             animation: Vec::new(),
-            border: (0x00000000, 1.0),
+            border: (0xFFFF00FF, 2.0),
         }
     }
 }
@@ -211,39 +209,52 @@ impl AnimationDrawable for Panel {
 
 impl ScrollableDrawable for Panel {
     fn is_scrollable(&self) -> bool {
-        self.scrollable
+        self.scroll.is_some()
     }
     fn set_scrolable(&mut self) {
-        self.scrollable = true;
+        self.scroll = Some(Scroll::default());
     }
     fn remove_scrolable(&mut self) {
-        self.scrollable = false;
+        self.scroll = None;
     }
-    fn set_offset(&mut self, x: f32, y: f32) {
-        self.base.rect.set_position(x as i16, y as i16);
+    fn set_offset(&mut self, x: f32, y: f32, area: &Rect<f32, u16>) {
+        let rect = &self.base.rect;
+        let y1 = rect.y1 + y;
 
-        self.scroll.set_offset(x, y);
+        self.base.rect.set_position(rect.x1, y1);
+
+        let y1 = self.base.rect.y1;
+        let y2 = self.base.rect.get_y2();
+
+        if y1 > area.get_y2() || y2 < area.y1 {
+            self.base.visible_on_this_frame = false;
+        } else {
+            self.base.visible_on_this_frame = true;
+        }
     }
-    fn get_offset(&self) -> &Scroll {
-        &self.scroll
-    }
-    fn scroll(&mut self, x: f32, y: f32) -> bool {
-        let change_y = self.scroll.change_offset_y(y);
-        let change_x = self.scroll.change_offset_x(x);
-        change_y || change_x
+
+    fn scroll(&mut self, x: f32, y: f32) {
+        if let Some(scroll) = &mut self.scroll {
+            let x_change = scroll.change_offset_x(x);
+            let y_change = scroll.change_offset_y(y);
+            if x_change && y_change {
+                //println!("y: {} h: {}", scroll.offset.1, scroll.height);
+                for child in &self.childs {
+                    if let Some(scrollable) = child.borrow_mut().as_scrollable() {
+                        scrollable.set_offset(x, y, &self.base.rect);
+                    }
+                }
+            }
+        }
     }
 }
 
 impl Drawable for Panel {
-    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>, offset: (f32, f32), level: u32) {
-        let scroll_val = self.scroll.get_offset();
-        let content_offset = (scroll_val.0 + offset.0, scroll_val.1 + offset.1);
-
+    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<f32, u16>, level: u32) {
         if self.base.visible && self.base.visible_on_this_frame {
             ctx.push_rect_sdf(
                 &self.base.rect,
                 self.base.settings.background_color,
-                offset,
                 0.0,
                 self.border,
                 level,
@@ -255,7 +266,6 @@ impl Drawable for Panel {
                 ctx.push_rect_sdf(
                     &self.base.rect,
                     self.base.settings.background_color,
-                    offset, // Смещение самой панели
                     0.0,
                     self.border,
                     current_content_level,
@@ -263,15 +273,20 @@ impl Drawable for Panel {
                 );
             }
 
+            let next_level = level + 1;
+
             for child in self.childs.iter() {
-                child
-                    .borrow()
-                    .print(ctx, &self.base.rect, content_offset, current_content_level);
+                child.borrow().print(ctx, &self.base.rect, next_level);
             }
         }
     }
 
-    fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext, scroll_item: bool) -> Rect<i16> {
+    fn resize(
+        &mut self,
+        area: &Rect<f32, u16>,
+        ctx: &LayoutContext,
+        scroll_item: bool,
+    ) -> Rect<f32, u16> {
         let rect = self.layout.calculate(&self.base.rect, area);
         self.base.rect = rect.clone();
 
@@ -309,7 +324,12 @@ impl Drawable for Panel {
                 let mut layout = padding_rect;
                 let mut offset = (0.0, 0.0);
                 let mut width = 0;
-                let scroll_offset = self.scroll.get_offset();
+
+                let scrollabe = self.is_scrollable();
+
+                if let Some(scroll) = &self.scroll {
+                    offset = scroll.get_offset()
+                }
 
                 for child in self.childs.iter_mut() {
                     let mut current_free_zone = layout.clone();
@@ -318,18 +338,17 @@ impl Drawable for Panel {
                     let margin = child.borrow().get_margin().clone();
 
                     let (x, y) = (
-                        (offset.0) as i16 + current_free_zone.x1,
-                        (offset.1) as i16 + current_free_zone.y1,
+                        (offset.0) + current_free_zone.x1,
+                        (offset.1) + current_free_zone.y1,
                     );
 
                     current_free_zone.set_position(x, y);
 
-                    let child_rect =
-                        child
-                            .borrow_mut()
-                            .resize(&current_free_zone, ctx, self.scrollable);
+                    let child_rect = child
+                        .borrow_mut()
+                        .resize(&current_free_zone, ctx, scrollabe);
 
-                    if !self.scrollable {
+                    if !scrollabe {
                         let (remainder, need_more) =
                             self.layout.next(&child_rect, &current_free_zone, margin);
 
@@ -338,32 +357,34 @@ impl Drawable for Panel {
                         }
 
                         layout = remainder;
-                    } else {
-                        width += child_rect.max.get_width();
+                    }
 
-                        //child.borrow_mut().as_base_mut().visible_on_this_frame = true;
-                        let buffer = 100.0; // Запас видимости
-                        if offset.1 + scroll_offset.1
-                            > (self.base.rect.min.get_height() as f32 + buffer)
-                        {
+                    if let Some(scroll) = &mut self.scroll {
+                        let item_top = offset.1;
+
+                        let item_height = child_rect.max.get_height() as f32;
+                        let item_bottom = item_top + item_height;
+
+                        let panel_view_height = self.base.rect.min.get_height() as f32;
+                        let buffer = 0.0;
+
+                        if item_bottom < -buffer || item_top > panel_view_height + buffer {
                             child.borrow_mut().as_base_mut().visible_on_this_frame = false;
-                            //continue;
-                        } else if offset.1 + scroll_offset.1 < -buffer {
-                            child.borrow_mut().as_base_mut().visible_on_this_frame = false;
-                            //continue;
                         } else {
                             child.borrow_mut().as_base_mut().visible_on_this_frame = true;
                         }
-                        offset.1 += child_rect.max.get_height() as f32
-                            + margin.up as f32
-                            + margin.down as f32;
+
+                        // Обновляем offset для следующего элемента
+                        offset.1 += item_height + margin.up as f32 + margin.down as f32;
+                        width = width.max(child_rect.min.get_width());
+
+                        scroll.set_height_width(offset.1 as u16, width);
+                        scroll.set_slider_height_width(
+                            self.base.rect.min.get_height(),
+                            self.base.rect.min.get_width(),
+                        );
                     }
                 }
-                self.scroll.set_height_width(offset.1 as i16, width);
-                self.scroll.set_slider_height_width(
-                    self.base.rect.min.get_height(),
-                    self.base.rect.min.get_width(),
-                );
             } else {
                 self.base.visible_on_this_frame = false;
             }
@@ -439,23 +460,23 @@ impl Drawable for Panel {
 
     fn under(&self, mx: u16, my: u16) -> bool {
         let rect = &self.base.rect;
-        let offset = self.scroll.get_offset();
+        let offset = (0.0, 0.0);
 
         let x1 = mx as f32 >= rect.x1 as f32 + offset.0;
-        let x2 = mx as f32 <= rect.x2 as f32 + offset.0;
+        let x2 = mx as f32 <= rect.get_x2() as f32 + offset.0;
         let y1 = my as f32 >= rect.y1 as f32 + offset.1;
-        let y2 = my as f32 <= rect.y2 as f32 + offset.1;
+        let y2 = my as f32 <= rect.get_y2() as f32 + offset.1;
         return x1 && x2 && y1 && y2;
     }
 
     fn hover(&self, mx: u16, my: u16) -> bool {
         let rect = &self.base.rect;
 
-        let x1 = mx as i16 >= rect.x1;
-        let x2 = mx as i16 <= rect.x2;
-        let y1 = my as i16 >= rect.y1;
-        let y2 = my as i16 <= rect.y2;
-        return x1 && x2 && y1 && y2;
+        let x1 = mx as f32 >= rect.x1;
+        let x2 = mx as f32 <= rect.get_x2();
+        let y1 = my as f32 >= rect.y1;
+        let y2 = my as f32 <= rect.get_y2();
+        return x1 && x2 && y1 && y2 && self.base.visible_on_this_frame;
     }
 
     fn as_base(&self) -> &Base {

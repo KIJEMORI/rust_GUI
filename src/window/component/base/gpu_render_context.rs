@@ -9,7 +9,6 @@ pub struct GpuRenderContext {
     pub shape_indices: Vec<u32>,
     pub text_storage: String,
     pub shape_section_offsets: Vec<Range<usize>>,
-    pub offsets: Vec<(f32, f32)>,
     pub command_sections: Vec<GpuCommand>,
 }
 
@@ -31,20 +30,10 @@ pub struct TextData {
     pub y: f32,
     pub size: f32,
     pub color: [f32; 4],
-    pub scroll_id: u32,
 }
 
 impl GpuRenderContext {
-    pub fn push_text(
-        &mut self,
-        text: &str,
-        x: f32,
-        y: f32,
-        size: f32,
-        color: u32,
-        offset: (f32, f32),
-        level: u32,
-    ) {
+    pub fn push_text(&mut self, text: &str, x: f32, y: f32, size: f32, color: u32, level: u32) {
         let start = self.text_storage.len();
         self.text_storage.push_str(text);
         let end = self.text_storage.len();
@@ -52,23 +41,20 @@ impl GpuRenderContext {
         let final_x = x;
         let final_y = y;
 
-        let scroll_id = self.register_scroll(offset);
-
         self.texts.push(TextData {
             range: start..end,
             x: final_x,
             y: final_y,
             size,
             color: u32_to_rgba(color),
-
-            scroll_id,
         });
 
-        let current_command_idx = (self.texts.len() - 1) as u32;
+        let current_command_idx =
+            self.shape_section_offsets.len() as u32 + (self.texts.len() - 1) as u32;
 
         self.command_sections.push(GpuCommand::Text(Section {
             level,
-            command_index: current_command_idx,
+            command_index: 0,
             command_count: 1,
             is_mask: false,
         }));
@@ -83,7 +69,6 @@ impl GpuRenderContext {
         color: [f32; 4],
         params: [f32; 4], // [радиус_толщина, тип, сглаживание, 0.0]
         border_color: [f32; 4],
-        scroll_id: u32,
         level: u32,
         is_clip: bool,
     ) {
@@ -105,7 +90,6 @@ impl GpuRenderContext {
             p_b,
             params,
             border_color,
-            scroll_id,
         });
 
         let start_vertex = self.shape_vertices.len();
@@ -126,14 +110,14 @@ impl GpuRenderContext {
             start_vertex + 1,
             start_vertex + 3,
         ];
-        self.shape_indices.extend_from_slice(&indices);
+        //self.shape_indices.extend_from_slice(&indices);
 
         let current_command_idx = (self.shape_section_offsets.len() - 1) as u32;
 
         // Первая секция
         self.command_sections.push(GpuCommand::Shape(Section {
             level: level,
-            command_index: current_command_idx,
+            command_index: 0,
             command_count: 1,
             is_mask: is_clip,
         }));
@@ -141,9 +125,8 @@ impl GpuRenderContext {
 
     pub fn push_rect_sdf(
         &mut self,
-        rect: &Rect<i16>,
+        rect: &Rect<f32, u16>,
         color: u32,
-        offset: (f32, f32),
         radius: f32,
         border: (u32, f32),
         level: u32,
@@ -151,8 +134,8 @@ impl GpuRenderContext {
     ) {
         let x1 = rect.x1 as f32;
         let y1 = rect.y1 as f32;
-        let x2 = rect.x2 as f32;
-        let y2 = rect.y2 as f32;
+        let x2 = rect.get_x2() as f32;
+        let y2 = rect.get_y2() as f32;
 
         let color_rgba = u32_to_rgba(color);
 
@@ -164,8 +147,6 @@ impl GpuRenderContext {
 
         let border_color = u32_to_rgba(border.0);
 
-        let scroll_id = self.register_scroll(offset);
-
         self.push_shape(
             [x1, y1],
             [x2, y2],
@@ -174,7 +155,6 @@ impl GpuRenderContext {
             color_rgba,
             [radius, 0.0, 1.0, border.1],
             border_color,
-            scroll_id,
             level,
             is_clip,
         );
@@ -202,8 +182,6 @@ impl GpuRenderContext {
 
         let border_color = u32_to_rgba(border.0);
 
-        let scroll_id = self.register_scroll((0.0, 0.0));
-
         // params: [половина толщины, тип: 1.0 (LINE), сглаживание: 1.0, 0.0]
         self.push_shape(
             [x1, y1], // min_p
@@ -213,7 +191,6 @@ impl GpuRenderContext {
             color_rgba,
             [thickness * 0.5, 1.0, 1.0, border.1],
             border_color,
-            scroll_id,
             level,
             is_clip,
         );
@@ -225,18 +202,17 @@ impl GpuRenderContext {
         self.texts.clear();
         self.text_storage.clear();
         self.shape_section_offsets.clear();
-        self.offsets.clear();
         self.command_sections.clear();
     }
-    pub fn register_scroll(&mut self, offset: (f32, f32)) -> u32 {
-        if let Some(pos) = self.offsets.iter().position(|&o| o == offset) {
-            return pos as u32;
-        }
-        // Если нет — добавляем новый
-        let id = self.offsets.len() as u32;
-        self.offsets.push(offset);
-        id
-    }
+    // pub fn register_scroll(&mut self, offset: (f32, f32)) -> u32 {
+    //     if let Some(pos) = self.offsets.iter().position(|&o| o == offset) {
+    //         return pos as u32;
+    //     }
+    //     // Если нет — добавляем новый
+    //     let id = self.offsets.len() as u32;
+    //     self.offsets.push(offset);
+    //     id
+    // }
 }
 
 fn u32_to_rgba(color: u32) -> [f32; 4] {

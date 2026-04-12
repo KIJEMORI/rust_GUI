@@ -21,11 +21,17 @@ impl Scroll {
         self.height = 0;
         self.width = 0;
     }
-    pub fn set_slider_height_width(&mut self, height: i16, width: i16) {
+    pub fn set_slider_height_width(&mut self, height: u16, width: u16) {
         self.slider_height = height as u16;
         self.slider_width = width as u16;
+        if height as u16 > self.height {
+            self.height = height as u16;
+        }
+        if width as u16 > self.width {
+            self.width = width as u16;
+        }
     }
-    pub fn set_height_width(&mut self, height: i16, width: i16) {
+    pub fn set_height_width(&mut self, height: u16, width: u16) {
         self.height = self.height.max(height as u16);
         self.width = self.width.max(width as u16);
     }
@@ -35,11 +41,17 @@ impl Scroll {
     pub fn set_offset(&mut self, x: f32, y: f32) {
         self.offset = (x, y);
     }
+    pub fn can_offset_x(&self, x: f32) -> bool {
+        if self.offset.0 == -((self.width - self.slider_width) as f32) && x < 0.0
+            || self.offset.0 == 0.0 && x > 0.0
+        {
+            return false;
+        }
+        true
+    }
+
     pub fn change_offset_x(&mut self, x: f32) -> bool {
-        // if self.offset.0 == 0.0 && x < 0.0 || self.offset.0 == self.width as f32 && x > 0.0 {
-        //     return false;
-        // }
-        if self.offset.0 == -(self.width as f32) && x < 0.0 || self.offset.0 == 0.0 && x > 0.0 {
+        if !self.can_offset_x(x) {
             return false;
         }
 
@@ -51,8 +63,17 @@ impl Scroll {
 
         true
     }
+
+    pub fn can_offset_y(&self, y: f32) -> bool {
+        if self.offset.1 == -((self.height - self.slider_height) as f32) && y < 0.0
+            || self.offset.1 == 0.0 && y > 0.0
+        {
+            return false;
+        }
+        true
+    }
     pub fn change_offset_y(&mut self, y: f32) -> bool {
-        if self.offset.1 == -(self.height as f32) && y < 0.0 || self.offset.1 == 0.0 && y > 0.0 {
+        if !self.can_offset_y(y) {
             return false;
         }
 

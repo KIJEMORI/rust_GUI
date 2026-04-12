@@ -1,13 +1,9 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use wgpu::RenderPassColorAttachment;
 
-use wgpu_glyph::{GlyphCruncher, Text};
 use winit::application::ApplicationHandler;
 use winit::event::{KeyEvent, MouseScrollDelta, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
@@ -29,9 +25,7 @@ use crate::window::component::managers::hover_manager::HoverManager;
 use crate::window::component::managers::scroll_manager::ScrollManager;
 use crate::window::component::managers::select_manager::SelectManager;
 use crate::window::component::panel::Panel;
-use crate::window::wgpu::draw_args::{DrawIndexedIndirectArgs, DrawIndirectArgs};
 use crate::window::wgpu::screen_uniform::ScrollData;
-use crate::window::wgpu::text_vertex::{TextVertex, push_glyph_to_vertices_raw};
 use crate::window::wgpu::wgpu_state::WgpuState;
 
 pub struct AppWinit {
@@ -80,7 +74,6 @@ impl Default for AppWinit {
                 shape_indices: Vec::with_capacity(1024),
                 texts: Vec::with_capacity(100),
                 text_storage: String::with_capacity(4096),
-                offsets: Vec::with_capacity(1024),
                 command_sections: Vec::with_capacity(1024),
             },
             last_render: Instant::now(),
@@ -90,20 +83,106 @@ impl Default for AppWinit {
 
 impl AppWinit {
     fn update_layout(&mut self) {
-        if let (Some(window), Some(state)) = (&self.window, &self.state) {
+        if let (Some(window), Some(state)) = (&self.window, &mut self.state) {
             let window_size = window.inner_size();
 
-            let fonts = state.text_vertex.glyph_brush.fonts();
+            state.text_vertex.section_hashes.fill(0);
 
-            let layout_context = LayoutContext { fonts: fonts };
-
+            let layout_context = LayoutContext {
+                font: &state.text_vertex.atlas.font,
+                sdf_base_size: 64.0,
+            };
             self.panel.resize(
-                &Rect::new(0, 0, window_size.width as i16, window_size.height as i16),
+                &Rect::new(
+                    0.0,
+                    0.0,
+                    window_size.width as u16,
+                    window_size.height as u16,
+                ),
                 &layout_context,
                 false,
             );
         }
     }
+    fn print(&mut self) {
+        let now = Instant::now();
+
+        if now.duration_since(self.last_render).as_millis() < 8 {
+            return;
+        }
+        self.last_render = now;
+
+        let state = self.state.as_mut().unwrap();
+
+        self.gpu_ctx.clear();
+
+        // Получаем текущий кадр из видеопамяти
+
+        self.panel
+            .print(&mut self.gpu_ctx, &self.panel.base.rect, 1);
+
+        state.prepare_gpu_data(&mut self.gpu_ctx);
+
+        let output = state.surface.get_current_texture().unwrap();
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Создаем "записчик" команд
+        let mut encoder = state
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Main Render Encoder"),
+            });
+
+        {
+            // Начинаем проход отрисовки (Render Pass)
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                color_attachments: &[Some(RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.1,
+                            g: 0.2,
+                            b: 0.3,
+                            a: 1.0,
+                        }), // Очистка фона
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &state.depth_stencil_view, // Твоя вьюшка, которую ты обновляешь в resize
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0), // Просто очистка, даже если не используем
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0), // Очищаем трафарет в 0 каждый кадр
+                        store: wgpu::StoreOp::Store,  // Сохраняем результат для тестов в этом кадре
+                    }),
+                }),
+                ..Default::default()
+            });
+
+            state.render(&self.gpu_ctx, &mut render_pass);
+        }
+
+        // Отправляем записанные команды на выполнение в видеокарту
+        state.queue.submit(std::iter::once(encoder.finish()));
+        output.present();
+
+        self.gpu_ctx.clear();
+
+        // Если надо включить постоянный режим отрисовки
+        // if self.edit_label_manager.is_editing() {
+        //     self.next_redraw = Some(Instant::now() + Duration::from_millis(500));
+        // } else {
+        //     self.next_redraw = None;
+        // }
+    }
+
     pub fn process_commands(&mut self) {
         let mut needs_layout = false;
         let mut resize = false;
@@ -202,7 +281,7 @@ impl ApplicationHandler for AppWinit {
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY, // Или DX12
+            backends: wgpu::Backends::VULKAN, // Или DX12
             flags: wgpu::InstanceFlags::empty(),
             ..Default::default()
         });
@@ -240,9 +319,20 @@ impl ApplicationHandler for AppWinit {
 
         // Конфигурация поверхности под размер окна
         let size = window.inner_size();
-        let config = surface
+        let mut config = surface
             .get_default_config(&adapter, size.width, size.height)
             .unwrap();
+        let caps = surface.get_capabilities(&adapter);
+        let present_mode = if caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
+            wgpu::PresentMode::Mailbox
+        } else if caps.present_modes.contains(&wgpu::PresentMode::Immediate) {
+            wgpu::PresentMode::Immediate
+        } else {
+            wgpu::PresentMode::Fifo // Дефолтный вариант
+        };
+
+        config.present_mode = present_mode;
+
         surface.configure(&device, &config);
 
         self.state = Some(WgpuState::new(surface, device, queue, config));
@@ -257,26 +347,28 @@ impl ApplicationHandler for AppWinit {
             WindowEvent::Resized(size) => {
                 if let Some(state) = self.state.as_mut() {
                     // Обновляем конфиг wgpu (чтобы не было растягивания картинки и утечек)
-                    state.config.width = size.width.max(1);
-                    state.config.height = size.height.max(1);
-                    state.surface.configure(&state.device, &state.config);
+                    // state.config.width = size.width.max(1);
+                    // state.config.height = size.height.max(1);
+                    // state.surface.configure(&state.device, &state.config);
+
+                    state.resize(size);
 
                     // Обновляем размеры корневой панели
                     let width = size.width as u16;
                     let height = size.height as u16;
 
+                    state.text_vertex.section_hashes.fill(0);
+
                     self.panel.set_width(width);
                     self.panel.set_height(height);
 
-                    let fonts = state.text_vertex.glyph_brush.fonts();
+                    let layout_context = LayoutContext {
+                        font: &state.text_vertex.atlas.font,
+                        sdf_base_size: 64.0,
+                    };
 
-                    let layout_context = LayoutContext { fonts: fonts };
-
-                    self.panel.resize(
-                        &Rect::new(0, 0, width as i16, height as i16),
-                        &layout_context,
-                        false,
-                    );
+                    self.panel
+                        .resize(&Rect::new(0.0, 0.0, width, height), &layout_context, false);
 
                     let screen_uniform = [size.width as f32, size.height as f32, 0.0, 0.0]; // +padding
                     state.queue.write_buffer(
@@ -285,127 +377,14 @@ impl ApplicationHandler for AppWinit {
                         bytemuck::cast_slice(&screen_uniform),
                     );
 
-                    state.resize(size);
-
-                    if let Some(window) = self.window.as_ref() {
-                        window.request_redraw();
-                    }
+                    // if let Some(window) = self.window.as_ref() {
+                    //     window.request_redraw();
+                    // }
+                    self.print();
                 }
             }
             WindowEvent::RedrawRequested => {
-                let now = Instant::now();
-
-                if now.duration_since(self.last_render).as_millis() < 8 {
-                    return;
-                }
-                self.last_render = now;
-
-                let state = self.state.as_mut().unwrap();
-
-                self.gpu_ctx.clear();
-
-                // Получаем текущий кадр из видеопамяти
-                let output = state.surface.get_current_texture().unwrap();
-                let view = output
-                    .texture
-                    .create_view(&wgpu::TextureViewDescriptor::default());
-
-                // Создаем "записчик" команд
-                let mut encoder =
-                    state
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Main Render Encoder"),
-                        });
-
-                self.panel
-                    .print(&mut self.gpu_ctx, &self.panel.base.rect, (0.0, 0.0), 1);
-
-                if !self.gpu_ctx.offsets.is_empty() {
-                    let gpu_scrolls: Vec<ScrollData> = self
-                        .gpu_ctx
-                        .offsets
-                        .iter()
-                        .map(|(x, y)| ScrollData {
-                            offsets: [*x, *y, 0.0, 0.0],
-                        })
-                        .collect();
-
-                    if !gpu_scrolls.is_empty() {
-                        state.queue.write_buffer(
-                            &state.scroll_storage_buffer,
-                            0,
-                            bytemuck::cast_slice(&gpu_scrolls),
-                        );
-                    }
-                }
-
-                {
-                    // Начинаем проход отрисовки (Render Pass)
-                    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        color_attachments: &[Some(RenderPassColorAttachment {
-                            view: &view,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color {
-                                    r: 0.1,
-                                    g: 0.2,
-                                    b: 0.3,
-                                    a: 1.0,
-                                }), // Очистка фона
-                                store: wgpu::StoreOp::Store,
-                            },
-                            depth_slice: None,
-                        })],
-                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                            view: &state.depth_stencil_view, // Твоя вьюшка, которую ты обновляешь в resize
-                            depth_ops: Some(wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(1.0), // Просто очистка, даже если не используем
-                                store: wgpu::StoreOp::Discard,
-                            }),
-                            stencil_ops: Some(wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(0), // Очищаем трафарет в 0 каждый кадр
-                                store: wgpu::StoreOp::Store, // Сохраняем результат для тестов в этом кадре
-                            }),
-                        }),
-                        ..Default::default()
-                    });
-
-                    if !self.gpu_ctx.shape_vertices.is_empty() {
-                        // state.queue.write_buffer(
-                        //     &state.vertex_buffer,
-                        //     0,
-                        //     bytemuck::cast_slice(&self.gpu_ctx.shape_vertices),
-                        // );
-
-                        // render_pass.set_pipeline(&state.panel_pipeline);
-                        // render_pass.set_bind_group(0, &state.bind_group, &[]);
-                        // render_pass.set_vertex_buffer(0, state.vertex_buffer.slice(..));
-
-                        // render_pass.draw(0..self.gpu_ctx.shape_vertices.len() as u32, 0..1);
-
-                        state.render_shape(&self.gpu_ctx);
-                    }
-
-                    if !self.gpu_ctx.texts.is_empty() {
-                        state.render_text(&self.gpu_ctx, self.last_render);
-                    }
-
-                    state.render(&self.gpu_ctx, &mut render_pass);
-                }
-
-                // Отправляем записанные команды на выполнение в видеокарту
-                state.queue.submit(std::iter::once(encoder.finish()));
-                output.present();
-
-                self.gpu_ctx.clear();
-
-                // Если надо включить постоянный режим отрисовки
-                // if self.edit_label_manager.is_editing() {
-                //     self.next_redraw = Some(Instant::now() + Duration::from_millis(500));
-                // } else {
-                //     self.next_redraw = None;
-                // }
+                self.print();
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_position = (position.x as u16, position.y as u16);
@@ -414,9 +393,10 @@ impl ApplicationHandler for AppWinit {
                     .hover(self.cursor_position.0, self.cursor_position.1);
 
                 if let Some(state) = self.state.as_mut() {
-                    let fonts = state.text_vertex.glyph_brush.fonts();
-
-                    let layout_context = LayoutContext { fonts: fonts };
+                    let layout_context = LayoutContext {
+                        font: &state.text_vertex.atlas.font,
+                        sdf_base_size: 64.0,
+                    };
                     if self.select_manager.select(
                         self.cursor_position.0,
                         self.cursor_position.1,
@@ -436,9 +416,10 @@ impl ApplicationHandler for AppWinit {
                     let (mx, my) = self.cursor_position;
 
                     if let Some(state) = self.state.as_ref() {
-                        let fonts = state.text_vertex.glyph_brush.fonts();
-
-                        let layout_context = LayoutContext { fonts: fonts };
+                        let layout_context = LayoutContext {
+                            font: &state.text_vertex.atlas.font,
+                            sdf_base_size: 64.0,
+                        };
                         self.select_manager.select_start(
                             self.cursor_position.0,
                             self.cursor_position.1,
@@ -468,6 +449,9 @@ impl ApplicationHandler for AppWinit {
                 if phase == TouchPhase::Moved || phase == TouchPhase::Started {
                     let (mx, my) = self.cursor_position;
                     if self.scroll_manager.scroll(mx, my, 0.0, scroll_amount) {
+                        if let Some(state) = self.state.as_mut() {
+                            state.text_vertex.section_hashes.fill(0);
+                        }
                         self.update_layout();
                         if let Some(w) = &self.window {
                             w.request_redraw();
@@ -488,16 +472,16 @@ impl ApplicationHandler for AppWinit {
 
         if let Some(state) = self.state.as_mut() {
             if !changed && state.text_vertex.last_defrag_time.elapsed() > Duration::from_secs(10) {
-                if state.is_defrag_worth_it() {
-                    state.perform_true_defragmentation();
-                    state.text_vertex.last_defrag_time = Instant::now();
+                // if state.is_defrag_worth_it() {
+                //     state.perform_true_defragmentation();
+                //     state.text_vertex.last_defrag_time = Instant::now();
 
-                    // После дефрагментации нужно один раз перерисовать,
-                    // так как Indirect Buffer обновился
-                    if let Some(window) = self.window.as_ref() {
-                        window.request_redraw();
-                    }
-                }
+                //     // После дефрагментации нужно один раз перерисовать,
+                //     // так как Indirect Buffer обновился
+                //     if let Some(window) = self.window.as_ref() {
+                //         window.request_redraw();
+                //     }
+                // }
             }
         }
 

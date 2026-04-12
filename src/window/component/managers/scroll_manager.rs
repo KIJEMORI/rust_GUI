@@ -25,7 +25,8 @@ impl ScrollManager {
                 let mut item = rc_item.borrow_mut();
                 if item.hover(mx, my) {
                     if let Some(scrollable) = item.as_scrollable() {
-                        return scrollable.scroll(x, y);
+                        scrollable.scroll(x, y);
+                        return true;
                     }
                     break;
                 }

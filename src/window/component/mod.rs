@@ -2,6 +2,7 @@ pub mod animation;
 pub mod base;
 pub mod button;
 pub mod edit_label;
+pub mod glyph;
 pub mod interface;
 pub mod label;
 pub mod layout;

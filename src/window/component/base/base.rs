@@ -10,7 +10,7 @@ use crate::window::component::{
 };
 pub struct Base {
     pub id: String,
-    pub rect: Rect<i16>,
+    pub rect: Rect<f32, u16>,
     pub visible: bool,
     pub settings: Settings,
     pub self_ref: Option<Weak<RefCell<dyn Drawable>>>,
@@ -21,7 +21,7 @@ pub struct Base {
 
 #[allow(dead_code)]
 impl Base {
-    pub fn new(id: String, rect: Rect<i16>) -> Base {
+    pub fn new(id: String, rect: Rect<f32, u16>) -> Base {
         Base {
             id: id,
             rect: rect,
@@ -35,17 +35,17 @@ impl Base {
     }
 
     #[allow(dead_code)]
-    pub fn set_position(&mut self, x: i16, y: i16) {
+    pub fn set_position(&mut self, x: f32, y: f32) {
         self.rect.set_position(x, y);
     }
 
     pub fn set_height(&mut self, h: u16) {
-        let safe_h = h.min(i16::MAX as u16) as i16;
+        let safe_h = h.min(u16::MAX);
         self.rect.set_height(safe_h);
     }
 
     pub fn set_width(&mut self, w: u16) {
-        let safe_w = w.min(i16::MAX as u16) as i16;
+        let safe_w = w.min(u16::MAX);
         self.rect.set_width(safe_w);
     }
 

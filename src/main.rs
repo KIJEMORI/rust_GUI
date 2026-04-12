@@ -1,18 +1,13 @@
 mod window;
 
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 
-use crate::window::component::animation::animation_action::{AnimationSequence, AnimationStep};
-use crate::window::component::base::component_type::SharedDrawable;
 use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::button::Button;
 use crate::window::component::edit_label::EditLabel;
 use crate::window::component::interface::component_control::LabelControl;
 use crate::window::component::interface::const_layout::ConstLayout;
-use crate::window::component::interface::drawable::{
-    AnimationDrawable, ClickableDrawable, Drawable,
-};
+use crate::window::component::interface::drawable::Drawable;
 use crate::window::component::label::Label;
 use crate::window::component::layout::const_base_layout::{ConstBaseLayout, Direction};
 use crate::window::component::layout::row_layout::RowLayout;
@@ -115,7 +110,7 @@ fn main() {
         up: 10,
         down: 10,
         right: 10,
-        left: 10,
+        left: 50,
     });
     panel.set_padding(Direction {
         up: 10,

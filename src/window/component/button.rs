@@ -34,10 +34,15 @@ impl Button {
 }
 
 impl Drawable for Button {
-    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<i16>, offset: (f32, f32), level: u32) {
-        self.label.print(ctx, area, offset, level);
+    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<f32, u16>, level: u32) {
+        self.label.print(ctx, area, level);
     }
-    fn resize(&mut self, area: &Rect<i16>, ctx: &LayoutContext, scroll_item: bool) -> Rect<i16> {
+    fn resize(
+        &mut self,
+        area: &Rect<f32, u16>,
+        ctx: &LayoutContext,
+        scroll_item: bool,
+    ) -> Rect<f32, u16> {
         self.label.resize(area, ctx, scroll_item)
     }
 
