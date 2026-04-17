@@ -1,32 +1,31 @@
-use std::rc::Rc;
-use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, mpsc};
-use std::time::{Duration, Instant};
-use wgpu::RenderPassColorAttachment;
-
-use winit::application::ApplicationHandler;
-use winit::event::{KeyEvent, MouseScrollDelta, TouchPhase, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow};
-use winit::window::{Window, WindowId};
-
 use crate::window::component::base::area::Rect;
 use crate::window::component::base::component_type::SharedDrawable;
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
 use crate::window::component::base::settings::Settings;
 use crate::window::component::base::ui_command::UiCommand;
-use crate::window::component::interface::component_control::{ComponentControl, PanelControl};
+use crate::window::component::interface::component_control::ComponentControl;
 use crate::window::component::interface::drawable::{Drawable, InternalAccess};
 use crate::window::component::interface::layout::Layout;
 use crate::window::component::layout::layout_context::LayoutContext;
 use crate::window::component::managers::animation_manager::AnimationManager;
 use crate::window::component::managers::button_manager::ButtonManager;
+use crate::window::component::managers::drag_manager::DragManager;
 use crate::window::component::managers::edit_label_manager::EditLabelManager;
 use crate::window::component::managers::hover_manager::HoverManager;
+use crate::window::component::managers::id_manager::{IDManager, get_upgrade_by_id};
 use crate::window::component::managers::scroll_manager::ScrollManager;
 use crate::window::component::managers::select_manager::SelectManager;
 use crate::window::component::panel::Panel;
-use crate::window::wgpu::screen_uniform::ScrollData;
 use crate::window::wgpu::wgpu_state::WgpuState;
+use std::rc::Rc;
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, mpsc};
+use std::time::{Duration, Instant};
+use wgpu::RenderPassColorAttachment;
+use winit::application::ApplicationHandler;
+use winit::event::{KeyEvent, Modifiers, MouseScrollDelta, TouchPhase, WindowEvent};
+use winit::event_loop::{ActiveEventLoop, ControlFlow};
+use winit::window::{Window, WindowId};
 
 pub struct AppWinit {
     window: Option<Arc<Window>>,
@@ -39,11 +38,14 @@ pub struct AppWinit {
     edit_label_manager: EditLabelManager,
     animation_manager: AnimationManager,
     scroll_manager: ScrollManager,
+    drag_manager: DragManager,
+    id_manager: IDManager,
     commands_rx: Receiver<UiCommand>,
     commands_tx: Sender<UiCommand>,
     next_redraw: Option<Instant>,
     gpu_ctx: GpuRenderContext,
     last_render: Instant,
+    modifiers: Modifiers,
 }
 
 impl Default for AppWinit {
@@ -54,6 +56,7 @@ impl Default for AppWinit {
         let mut settings = Settings::default();
         settings.command_tx = Some(tx.clone());
         panel.base.settings = settings;
+
         Self {
             window: Option::default(),
             state: Option::default(),
@@ -65,6 +68,8 @@ impl Default for AppWinit {
             edit_label_manager: EditLabelManager::default(),
             animation_manager: AnimationManager::default(),
             scroll_manager: ScrollManager::default(),
+            drag_manager: DragManager::default(),
+            id_manager: IDManager::default(),
             commands_tx: tx,
             commands_rx: rx,
             next_redraw: None,
@@ -77,6 +82,7 @@ impl Default for AppWinit {
                 command_sections: Vec::with_capacity(1024),
             },
             last_render: Instant::now(),
+            modifiers: Modifiers::default(),
         }
     }
 }
@@ -92,6 +98,9 @@ impl AppWinit {
                 font: &state.text_vertex.atlas.font,
                 sdf_base_size: 64.0,
             };
+
+            let scrolable = self.panel.as_scrollable().unwrap().is_scrollable();
+
             self.panel.resize(
                 &Rect::new(
                     0.0,
@@ -100,7 +109,7 @@ impl AppWinit {
                     window_size.height as u16,
                 ),
                 &layout_context,
-                false,
+                scrolable,
             );
         }
     }
@@ -115,8 +124,6 @@ impl AppWinit {
         let state = self.state.as_mut().unwrap();
 
         self.gpu_ctx.clear();
-
-        // Получаем текущий кадр из видеопамяти
 
         self.panel
             .print(&mut self.gpu_ctx, &self.panel.base.rect, 1);
@@ -181,6 +188,9 @@ impl AppWinit {
         // } else {
         //     self.next_redraw = None;
         // }
+
+        // let duration = now.elapsed(); // Получаем длительность
+        // println!("Время кадра: {:?}", duration);
     }
 
     pub fn process_commands(&mut self) {
@@ -188,7 +198,7 @@ impl AppWinit {
         let mut resize = false;
 
         while let Ok(cmd) = self.commands_rx.try_recv() {
-            cmd.execute_command();
+            cmd.execute_command(&self.id_manager);
             self.execute_command(cmd, &mut needs_layout, &mut resize);
         }
 
@@ -221,7 +231,8 @@ impl AppWinit {
 
             UiCommand::EditLabel(el) => {
                 if let Some(el) = el {
-                    self.edit_label_manager.set_edit_label(el);
+                    self.edit_label_manager
+                        .set_edit_label(&el, &self.id_manager);
                     *needs_layout = true;
                     *resize = true
                 }
@@ -233,24 +244,24 @@ impl AppWinit {
                     None => scheduled,
                 });
             }
-            UiCommand::SetOnClick(el, _) => {
-                if let Some(el) = el {
-                    self.button_manager.add(el);
+            UiCommand::SetOnClick(id, _) => {
+                if let Some(el) = get_upgrade_by_id(&id, &self.id_manager) {
+                    self.button_manager.add(el.borrow().as_base().id);
                 }
             }
-            UiCommand::SetOnMouseEnter(el, _) => {
-                if let Some(el) = el {
-                    self.hover_manager.add(el);
+            UiCommand::SetOnMouseEnter(id, _) => {
+                if let Some(id) = id {
+                    self.hover_manager.add(id);
                 }
             }
-            UiCommand::SetOnMouseLeave(el, _) => {
-                if let Some(el) = el {
-                    self.hover_manager.add(el);
+            UiCommand::SetOnMouseLeave(id, _) => {
+                if let Some(id) = id {
+                    self.hover_manager.add(id);
                 }
             }
-            UiCommand::StartAnimation(el) => {
-                if let Some(el) = el {
-                    self.animation_manager.start(el);
+            UiCommand::StartAnimation(id) => {
+                if let Some(id) = id {
+                    self.animation_manager.start(&id, &self.id_manager);
                 }
             }
             _ => (),
@@ -264,7 +275,8 @@ impl AppWinit {
     fn handle_key(&mut self, event: KeyEvent) {
         let mut needs_layout = false;
 
-        self.edit_label_manager.handle_key(event, &mut needs_layout);
+        self.edit_label_manager
+            .handle_key(event, &mut needs_layout, &self.id_manager);
 
         if needs_layout {
             self.update_layout();
@@ -359,8 +371,10 @@ impl ApplicationHandler for AppWinit {
 
                     state.text_vertex.section_hashes.fill(0);
 
-                    self.panel.set_width(width);
-                    self.panel.set_height(height);
+                    self.panel
+                        .as_panel_control_mut()
+                        .set_width(width)
+                        .set_height(height);
 
                     let layout_context = LayoutContext {
                         font: &state.text_vertex.atlas.font,
@@ -389,8 +403,13 @@ impl ApplicationHandler for AppWinit {
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_position = (position.x as u16, position.y as u16);
 
-                self.hover_manager
-                    .hover(self.cursor_position.0, self.cursor_position.1);
+                let mut need_redraw = false;
+
+                self.hover_manager.hover(
+                    self.cursor_position.0,
+                    self.cursor_position.1,
+                    &self.id_manager,
+                );
 
                 if let Some(state) = self.state.as_mut() {
                     let layout_context = LayoutContext {
@@ -401,11 +420,20 @@ impl ApplicationHandler for AppWinit {
                         self.cursor_position.0,
                         self.cursor_position.1,
                         &layout_context,
+                        &self.id_manager,
                     ) {
-                        self.update_layout();
-                        if let Some(w) = &self.window {
-                            w.request_redraw();
-                        }
+                        need_redraw = true;
+                    }
+                }
+
+                let (mx, my) = self.cursor_position;
+
+                need_redraw = need_redraw || self.drag_manager.drag(mx, my, &self.id_manager);
+
+                if need_redraw {
+                    self.update_layout();
+                    if let Some(w) = &self.window {
+                        w.request_redraw();
                     }
                 }
             }
@@ -424,31 +452,47 @@ impl ApplicationHandler for AppWinit {
                             self.cursor_position.0,
                             self.cursor_position.1,
                             &layout_context,
+                            &self.id_manager,
                         );
                     }
-                    self.edit_label_manager.stop_edit();
+                    self.edit_label_manager.stop_edit(&self.id_manager);
 
-                    self.button_manager.click(mx as u16, my as u16);
+                    self.drag_manager.drag_start(mx, my, &self.id_manager);
+
+                    self.button_manager
+                        .click(mx as u16, my as u16, &self.id_manager);
                 } else if button == winit::event::MouseButton::Left
                     && state == winit::event::ElementState::Released
                 {
                     self.select_manager.stop_select();
+                    self.drag_manager.stop_drag(&self.id_manager);
                 }
             }
             WindowEvent::MouseWheel { delta, phase, .. } => {
-                let scroll_amount = match delta {
+                let (scroll_amount_x, scroll_amount_y) = match delta {
                     MouseScrollDelta::LineDelta(x, y) => {
-                        // y: 1.0 — вверх, -1.0 — вниз.
-                        y * 10.5
+                        let (mut dx, mut dy) = (x * 20.0, y * 20.0);
+
+                        if self.modifiers.state().shift_key() && dy != 0.0 && dx == 0.0 {
+                            dx = dy;
+                            dy = 0.0;
+                        }
+                        (dx, dy)
                     }
 
-                    MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
+                    MouseScrollDelta::PixelDelta(pos) => (pos.x as f32, pos.y as f32),
                 };
 
                 // Если прокрутка активна (или тачпад в процессе движения)
                 if phase == TouchPhase::Moved || phase == TouchPhase::Started {
                     let (mx, my) = self.cursor_position;
-                    if self.scroll_manager.scroll(mx, my, 0.0, scroll_amount) {
+                    if self.scroll_manager.scroll(
+                        mx,
+                        my,
+                        scroll_amount_x,
+                        scroll_amount_y,
+                        &self.id_manager,
+                    ) {
                         if let Some(state) = self.state.as_mut() {
                             state.text_vertex.section_hashes.fill(0);
                         }
@@ -462,11 +506,16 @@ impl ApplicationHandler for AppWinit {
             WindowEvent::KeyboardInput { event, .. } => {
                 self.handle_key(event);
             }
+            WindowEvent::ModifiersChanged(new_modifiers) => {
+                self.modifiers = new_modifiers;
+            }
             _ => (),
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        let changed = self.animation_manager.update(&self.commands_tx);
+        let changed = self
+            .animation_manager
+            .update(&self.commands_tx, &self.id_manager);
 
         self.process_commands();
 
@@ -524,6 +573,8 @@ impl ComponentControl for AppWinit {
             &mut self.hover_manager,
             &mut self.select_manager,
             &mut self.scroll_manager,
+            &mut self.drag_manager,
+            &mut self.id_manager,
             &InternalAccess(()),
         );
 
@@ -540,11 +591,5 @@ impl ComponentControl for AppWinit {
 
     fn set_layout(&mut self, layout: Box<dyn Layout>) {
         self.panel.set_layout(layout);
-    }
-}
-
-impl PanelControl for AppWinit {
-    fn set_background(&mut self, color: u32) {
-        self.panel.set_background(color);
     }
 }

@@ -16,7 +16,10 @@ pub trait ComponentControl {
 
 #[allow(dead_code)]
 pub trait PanelControl {
-    fn set_background(&mut self, color: u32);
+    fn set_background(&mut self, color: u32) -> &mut dyn PanelControl;
+    fn set_position(&mut self, x: f32, y: f32) -> &mut dyn PanelControl;
+    fn set_height(&mut self, h: u16) -> &mut dyn PanelControl;
+    fn set_width(&mut self, w: u16) -> &mut dyn PanelControl;
 }
 
 #[allow(dead_code)]

@@ -1,33 +1,36 @@
 use std::{rc::Rc, time::Duration};
 
 use crate::window::component::{
-    animation::animation_action::AnimationSequence, base::component_type::SharedDrawable,
+    animation::animation_action::AnimationSequence,
+    base::component_type::SharedDrawable,
+    managers::id_manager::{IDManager, get_upgrade_by_id},
 };
 
 #[derive(Clone)]
 pub enum UiCommand<T = ()> {
-    ChangeColor(Option<SharedDrawable>, u32),
-    SetText(Option<SharedDrawable>, String),
-    Custom(Option<SharedDrawable>, Rc<dyn Fn(SharedDrawable)>),
-    SetScale(Option<SharedDrawable>, u16),
-    EditLabel(Option<SharedDrawable>),
+    ChangeColor(Option<u32>, u32),
+    SetText(Option<u32>, String),
+    Custom(Option<u32>, Rc<dyn Fn(SharedDrawable)>),
+    SetScale(Option<u32>, u16),
+    EditLabel(Option<u32>),
     RequestRedraw(),
     RequestRedrawWithoutResize(),
     RequestRedrawWithTimer(Duration),
-    SetOnClick(Option<SharedDrawable>, Box<UiCommand>),
-    SetOnMouseEnter(Option<SharedDrawable>, Box<UiCommand>),
-    SetOnMouseLeave(Option<SharedDrawable>, Box<UiCommand>),
-    SetAnimation(Option<SharedDrawable>, Rc<Vec<AnimationSequence>>),
-    AddAnimation(Option<SharedDrawable>, Rc<AnimationSequence>),
-    AddAnimationBatch(Option<SharedDrawable>, Rc<Vec<AnimationSequence>>),
-    StartAnimation(Option<SharedDrawable>),
+    SetOnClick(Option<u32>, Box<UiCommand>),
+    SetOnMouseEnter(Option<u32>, Box<UiCommand>),
+    SetOnMouseLeave(Option<u32>, Box<UiCommand>),
+    SetAnimation(Option<u32>, Rc<Vec<AnimationSequence>>),
+    AddAnimation(Option<u32>, Rc<AnimationSequence>),
+    AddAnimationBatch(Option<u32>, Rc<Vec<AnimationSequence>>),
+    StartAnimation(Option<u32>),
     None(),
     Batch(Vec<UiCommand>),
     Other(T),
+    DragItem(Option<u32>),
 }
 
 impl UiCommand {
-    pub fn fill_ref(&mut self, item: &SharedDrawable) {
+    pub fn fill_ref(&mut self, item: &u32) {
         match self {
             UiCommand::Batch(cmds) => {
                 for c in cmds {
@@ -43,38 +46,39 @@ impl UiCommand {
             | UiCommand::SetOnMouseLeave(target, _)
             | UiCommand::SetAnimation(target, _)
             | UiCommand::StartAnimation(target)
-            | UiCommand::Custom(target, _) => {
+            | UiCommand::Custom(target, _)
+            | UiCommand::DragItem(target) => {
                 if target.is_none() {
-                    *target = Some(Rc::clone(item));
+                    *target = Some(item.clone());
                 }
             }
             _ => (),
         }
     }
-    pub fn execute_command(&self) {
+    pub fn execute_command(&self, id_manager: &IDManager) {
         match self {
             UiCommand::Batch(commands) => {
                 for c in commands {
-                    c.execute_command();
+                    c.execute_command(id_manager);
                 }
             }
-            UiCommand::ChangeColor(el, color) => {
-                if let Some(el) = el {
-                    if let Some(panel) = el.borrow_mut().as_panel_control_mut() {
-                        panel.set_background(*color);
-                    }
+            UiCommand::ChangeColor(id, color) => {
+                if let Some(el) = get_upgrade_by_id(id, id_manager) {
+                    el.borrow_mut()
+                        .as_panel_control_mut()
+                        .set_background(*color);
                 }
             }
-            UiCommand::SetScale(el, scale) => {
-                if let Some(el) = el {
+            UiCommand::SetScale(id, scale) => {
+                if let Some(el) = get_upgrade_by_id(id, id_manager) {
                     let mut e = el.borrow_mut();
                     if let Some(ctrl) = e.as_label_control_mut() {
                         ctrl.set_scale(*scale);
                     }
                 }
             }
-            UiCommand::SetText(el, text) => {
-                if let Some(el) = el {
+            UiCommand::SetText(id, text) => {
+                if let Some(el) = get_upgrade_by_id(id, id_manager) {
                     let mut e = el.borrow_mut();
                     if let Some(ctrl) = e.as_label_control_mut() {
                         let text = text.clone();
@@ -82,56 +86,56 @@ impl UiCommand {
                     }
                 }
             }
-            UiCommand::SetOnClick(el, command) => {
-                if let Some(el) = el {
-                    if let Some(clickable) = el.borrow_mut().as_clickable() {
+            UiCommand::SetOnClick(id, command) => {
+                if let Some(el) = get_upgrade_by_id(id, id_manager) {
+                    if let Some(clickable) = el.borrow_mut().as_clickable_mut() {
                         let cmd = *command.clone();
                         clickable.set_on_click(cmd);
                     }
                 }
             }
-            UiCommand::SetOnMouseEnter(el, command) => {
-                if let Some(el) = el {
-                    if let Some(hovearable) = el.borrow_mut().as_hoverable() {
+            UiCommand::SetOnMouseEnter(id, command) => {
+                if let Some(el) = get_upgrade_by_id(id, id_manager) {
+                    if let Some(hovearable) = el.borrow_mut().as_hoverable_mut() {
                         let cmd = *command.clone();
                         hovearable.set_on_mouse_enter(cmd);
                     }
                 }
             }
-            UiCommand::SetOnMouseLeave(el, command) => {
-                if let Some(el) = el {
-                    if let Some(hovearable) = el.borrow_mut().as_hoverable() {
+            UiCommand::SetOnMouseLeave(id, command) => {
+                if let Some(el) = get_upgrade_by_id(id, id_manager) {
+                    if let Some(hovearable) = el.borrow_mut().as_hoverable_mut() {
                         let cmd = *command.clone();
                         hovearable.set_on_mouse_leave(cmd);
                     }
                 }
             }
-            UiCommand::SetAnimation(el, animation) => {
-                if let Some(el) = el {
-                    if let Some(with_animation) = el.borrow_mut().as_with_animation() {
+            UiCommand::SetAnimation(id, animation) => {
+                if let Some(el) = get_upgrade_by_id(id, id_manager) {
+                    if let Some(with_animation) = el.borrow_mut().as_with_animation_mut() {
                         let anim = (*(*animation).clone()).clone();
                         with_animation.set_animation(anim);
                     }
                 }
             }
-            UiCommand::AddAnimation(el, animation) => {
-                if let Some(el) = el {
-                    if let Some(with_animation) = el.borrow_mut().as_with_animation() {
+            UiCommand::AddAnimation(id, animation) => {
+                if let Some(el) = get_upgrade_by_id(id, id_manager) {
+                    if let Some(with_animation) = el.borrow_mut().as_with_animation_mut() {
                         let anim = (*(*animation).clone()).clone();
                         with_animation.add_animation(anim);
                     }
                 }
             }
-            UiCommand::AddAnimationBatch(el, animations) => {
-                if let Some(el) = el {
-                    if let Some(with_animation) = el.borrow_mut().as_with_animation() {
+            UiCommand::AddAnimationBatch(id, animations) => {
+                if let Some(el) = get_upgrade_by_id(id, id_manager) {
+                    if let Some(with_animation) = el.borrow_mut().as_with_animation_mut() {
                         let anim = (*(*animations).clone()).clone();
                         with_animation.add_animation_batch(anim);
                     }
                 }
             }
-            UiCommand::Custom(el, action) => {
-                if let Some(el) = el {
+            UiCommand::Custom(id, action) => {
+                if let Some(el) = get_upgrade_by_id(id, id_manager) {
                     (action)(el.clone());
                 }
             }

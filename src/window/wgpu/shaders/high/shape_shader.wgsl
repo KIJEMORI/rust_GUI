@@ -63,37 +63,50 @@ fn sd_segment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
-    let smoothing = in.params.z;
-    let thickness = in.params.w; // Толщина рамки
+    let params = in.params;
+
+    let smoothing = params.z;
+    let thickness = params.w; // Толщина рамки
     var d_outer: f32;
     var d_inner: f32;
 
-    let obj_type = in.params.y;
+    let obj_type = params.y;
 
-    if (obj_type > 1.5 && obj_type < 2.5 ){
+    if (obj_type > 1.5){ // Текст
         // let dist = textureSample(t_diffuse, s_diffuse, in.p_a).r;
         // let smoothing = fwidth(dist);
         // let alpha = smoothstep(0.5 - smoothing, 0.5 + smoothing, dist);
         // if (alpha <= 0.0) { discard; }
         // return vec4<f32>(in.color.rgb, in.color.a * alpha);
-        let alpha = textureSample(t_diffuse, s_diffuse, in.p_a).r;
-        if (alpha < 0.1) { discard; }
-        return vec4<f32>(in.color.rgb, in.color.a * alpha);
+        // let alpha = textureSample(t_diffuse, s_diffuse, in.p_a).r;
+        // if (alpha < 0.1) { discard; }
+        // return vec4<f32>(in.color.rgb, in.color.a * alpha);
+        let dist = textureSample(t_diffuse, s_diffuse, in.p_a).r;
+
+        let smoothing = fwidth(dist) * 0.7;
+
+        let threshold = 0.54;
+        let alpha = smoothstep(threshold - smoothing, threshold + smoothing, dist);
+        let final_alpha = pow(alpha, 1.0 / 2.2);
+
+        if (final_alpha <= 0.05) { discard; }
+
+        // Умножаем альфу на итоговый цвет
+        return vec4<f32>(in.color.rgb, in.color.a * final_alpha);
 
     }
-    if (obj_type < 0.5) { // Прямоугольник
+    else if (obj_type > 0.5) { // Линия
+        d_outer = sd_segment(in.canvas_pos, in.p_a, in.p_b) - params.x;
+        d_inner = 1.0;
+    } else { // Прямоугольник
         let p = in.canvas_pos - in.p_a;
         let half_size = in.p_b * 0.5;
-        let radius = in.params.x;
+        let radius = params.x;
 
         // Дистанция до внешнего края
         d_outer = sd_rounded_rect(p, half_size, radius);
         // Дистанция до внутреннего края (уменьшаем размер на толщину)
         d_inner = sd_rounded_rect(p, half_size - vec2<f32>(thickness), max(0.0, radius - thickness));
-    } else {
-
-        d_outer = sd_segment(in.canvas_pos, in.p_a, in.p_b) - in.params.x;
-        d_inner = 1.0;
     }
 
     if (d_outer > 0.0) {

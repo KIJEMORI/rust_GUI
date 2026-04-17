@@ -3,8 +3,8 @@ pub struct Scroll {
     pub offset: (f32, f32),
     pub height: u16,
     pub width: u16,
-    slider_height: u16,
-    slider_width: u16,
+    pub slider_height: u16,
+    pub slider_width: u16,
 }
 
 impl Scroll {
@@ -21,9 +21,10 @@ impl Scroll {
         self.height = 0;
         self.width = 0;
     }
+
     pub fn set_slider_height_width(&mut self, height: u16, width: u16) {
-        self.slider_height = height as u16;
-        self.slider_width = width as u16;
+        self.slider_height = height;
+        self.slider_width = width;
         if height as u16 > self.height {
             self.height = height as u16;
         }
@@ -32,8 +33,8 @@ impl Scroll {
         }
     }
     pub fn set_height_width(&mut self, height: u16, width: u16) {
-        self.height = self.height.max(height as u16);
-        self.width = self.width.max(width as u16);
+        self.height = height as u16;
+        self.width = width as u16;
     }
     pub fn get_offset(&self) -> (f32, f32) {
         self.offset

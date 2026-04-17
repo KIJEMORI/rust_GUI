@@ -8,3 +8,5 @@ pub mod label;
 pub mod layout;
 pub mod managers;
 pub mod panel;
+pub mod scroll_panel;
+pub mod theme;

@@ -9,11 +9,10 @@ use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::interface::component_control::{
     EditLabelControl, FullEditControl, LabelControl, PanelControl,
 };
-use crate::window::component::interface::const_layout::ConstLayout;
 use crate::window::component::interface::drawable::{
-    AnimationDrawable, ClickableDrawable, Drawable, HoverableDrawable, SelectableDrawable,
+    AnimationDrawable, ClickableDrawable, Drawable, HoverableDrawable, LayoutDrawable,
+    ScrollableDrawable, SelectableDrawable,
 };
-use crate::window::component::layout::const_base_layout::Direction;
 use crate::window::component::layout::layout_context::LayoutContext;
 use crate::window::component::panel::Panel;
 
@@ -25,6 +24,7 @@ pub struct Label {
     color: u32,
     needs_layout: bool,
     editable: bool,
+    change_cursor: bool,
     cursor_need: bool,
     cursor: Rect<f32, u16>,
     cursor_index: u32,
@@ -45,6 +45,7 @@ impl Label {
             color: 0xFF000000,
             needs_layout: true,
             editable: false,
+            change_cursor: false,
             cursor_need: false,
             cursor: Rect::default(),
             cursor_index: 0,
@@ -60,13 +61,6 @@ impl Label {
         let text = text.to_string();
 
         Label::new(text)
-    }
-
-    pub fn set_height(&mut self, h: u16) {
-        self.panel.set_height(h);
-    }
-    pub fn set_width(&mut self, w: u16) {
-        self.panel.set_width(w);
     }
 
     pub fn calculate_intrinsic_size(&self, font: &fontdue::Font, scale: f32) -> (u16, u16) {
@@ -136,6 +130,10 @@ impl Label {
     fn get_index(&self, target_x: f32, font: &fontdue::Font, scale: f32) -> u32 {
         let mut current_x = self.panel.base.rect.x1;
 
+        if let Some(scroll) = &self.panel.scroll {
+            current_x += scroll.offset.0;
+        }
+
         for (i, c) in self.text.chars().enumerate() {
             let metrics = font.metrics(c, scale);
             let char_width = metrics.advance_width;
@@ -198,11 +196,13 @@ impl LabelControl for Label {
         // Вычисляем индекс символа под курсором мыши
         self.select_index_start = self.get_index(select_start.0 as f32, ctx.font, self.scale);
         self.select_index_end = self.select_index_start;
-        self.cursor_index = self.select_index_start; // Не забудь про индекс курсора
+        self.cursor_index = self.select_index_start;
+        self.change_cursor = true
     }
     fn set_end_caret(&mut self, select_end: (u16, u16), ctx: &LayoutContext) -> bool {
         let last_end_index = self.select_index_end;
         self.select_index_end = self.get_index(select_end.0 as f32, ctx.font, self.scale);
+        self.change_cursor = true;
 
         if self.select_index_start != self.select_index_end
             && self.select_index_end != last_end_index
@@ -226,7 +226,7 @@ impl EditLabelControl for Label {
     }
     fn on_cursor(&mut self) {
         self.cursor_need = true;
-        self.as_with_animation().unwrap().restart_animations();
+        self.as_with_animation_mut().unwrap().restart_animations();
     }
     fn delete_cursor(&mut self) {
         self.cursor_need = false;
@@ -241,7 +241,8 @@ impl EditLabelControl for Label {
             self.select_index_end = self.cursor_index;
             self.select_index_start = self.cursor_index;
         }
-        self.as_with_animation().unwrap().restart_animations();
+        self.change_cursor = true;
+        self.as_with_animation_mut().unwrap().restart_animations();
     }
 
     fn add_text(&mut self, text: &SmolStr) {
@@ -302,9 +303,10 @@ impl EditLabelControl for Label {
     }
 
     fn sync_indexes(&mut self) {
+        self.change_cursor = true;
         self.select_index_start = self.cursor_index;
         self.select_index_end = self.cursor_index;
-        self.as_with_animation().unwrap().restart_animations();
+        self.as_with_animation_mut().unwrap().restart_animations();
     }
 
     fn get_byte_offset(&self, char_idx: u32) -> usize {
@@ -325,35 +327,53 @@ impl SelectableDrawable for Label {
 impl Drawable for Label {
     fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<f32, u16>, level: u32) {
         if self.panel.base.visible_on_this_frame {
-            self.panel.print(ctx, area, level);
-            //let level = level - 1;
-
-            let content_level = level + 1;
+            //self.panel.print(ctx, area, level);
 
             let rect = &self.panel.base.rect;
-            // ctx.push_rect_sdf(
-            //     rect,
-            //     self.panel.base.settings.background_color,
-            //     offset,
-            //     0.0,
-            //     self.panel.border,
-            //     level,
-            //     false,
-            // );
+
+            let border = &self.panel.border;
+
+            ctx.push_rect_sdf(
+                &rect,
+                self.panel.base.settings.background_color,
+                border,
+                level,
+                true,
+                false,
+            );
 
             if self.select_index_start != self.select_index_end {
                 let mut select_rect = self.select_rect.clone();
                 select_rect.set_position(select_rect.x1, rect.y1);
 
-                ctx.push_rect_sdf(&select_rect, self.select_color, 5.0, (0, 0.0), level, false);
+                ctx.push_rect_sdf(&select_rect, self.select_color, border, level, false, false);
             }
 
-            ctx.push_text(&self.text, rect.x1, rect.y1, self.scale, self.color, level);
+            let mut text_x1 = rect.x1;
+            let mut text_y1 = rect.y1;
+
+            if let Some(scroll) = &self.panel.scroll {
+                let offset = scroll.get_offset();
+                text_x1 += offset.0;
+                text_y1 += offset.1;
+            }
+
+            ctx.push_text(&self.text, text_x1, text_y1, self.scale, self.color, level);
+
             if self.cursor_need {
                 let mut cursor_rect = self.cursor.clone();
                 cursor_rect.set_position(cursor_rect.x1, rect.y1);
-                ctx.push_rect_sdf(&cursor_rect, self.cursor_color, 1.0, (0, 0.0), level, false);
+                ctx.push_rect_sdf(&cursor_rect, self.cursor_color, border, level, false, false);
             }
+
+            ctx.push_rect_sdf(
+                &rect,
+                self.panel.base.settings.background_color,
+                border,
+                level,
+                true,
+                true,
+            );
         }
     }
 
@@ -417,8 +437,15 @@ impl Drawable for Label {
         }
 
         if self.select_index_start != self.select_index_end {
-            let x1_offset = x_start;
-            let x2_offset = x_end.min(rect.get_x2());
+            let mut x1_offset = x_start;
+            let mut x2_offset = x_end;
+
+            if let Some(scroll) = &mut self.panel.scroll {
+                x1_offset += scroll.offset.0;
+                x2_offset += scroll.offset.0;
+            }
+
+            x2_offset = x2_offset.min(rect.get_x2());
 
             let first_point = ((rect.x1 as f32 + x1_offset.min(x2_offset)), rect.y1);
             let second_point = ((rect.x1 as f32 + x1_offset.max(x2_offset)), rect.get_y2());
@@ -426,20 +453,35 @@ impl Drawable for Label {
             self.select_rect = Rect::new_from_coord(first_point, second_point);
         }
 
+        let x_offset = x_cursor;
+        let mut x_pos = rect.x1 as f32 + x_offset;
+
+        let x2 = rect.get_x2();
+
+        if let Some(scroll) = &mut self.panel.scroll
+            && self.change_cursor
         {
-            let x_offset = x_cursor;
-            let x_pos = rect.x1 as f32 + x_offset;
+            if x_pos + scroll.offset.0 > x2 {
+                let scroll_x_offset = x2 - scroll.offset.0 - x_pos;
 
-            let x2 = rect.get_x2();
+                scroll.change_offset_x(scroll_x_offset);
+            } else if x_pos < rect.x1 - scroll.offset.0 {
+                let scroll_x_offset = rect.x1 - scroll.offset.0 - x_pos;
 
-            if x_pos > x2 {
-                rect.set_position(x2 - x_pos, rect.y1);
+                scroll.change_offset_x(scroll_x_offset);
             }
-
-            let x_pos = (x_pos).min(x2 - 1.0);
-
-            self.cursor = Rect::new_from_coord((x_pos, rect.y1), (x_pos + 1.0, rect.get_y2()));
+            self.change_cursor = false;
         }
+
+        if let Some(scroll) = &mut self.panel.scroll {
+            x_pos += scroll.offset.0
+        }
+
+        //rect.set_position(x2 - x_pos, rect.y1);
+
+        //let x_pos = (x_pos).min(x2 - 1.0);
+
+        self.cursor = Rect::new_from_coord((x_pos, rect.y1), (x_pos + 1.0, rect.get_y2()));
 
         self.panel.base.rect.clone()
 
@@ -472,23 +514,16 @@ impl Drawable for Label {
 
     add_drawable_control!();
 
-    fn set_padding(&mut self, direction: Direction) {
-        self.panel.set_padding(direction);
+    fn as_layout_control(&self) -> &dyn LayoutDrawable {
+        self.panel.as_layout_control()
     }
-    fn set_margin(&mut self, direction: Direction) {
-        self.panel.set_margin(direction);
+    fn as_layout_control_mut(&mut self) -> &mut dyn LayoutDrawable {
+        self.panel.as_layout_control_mut()
     }
-    fn set_const_layout(&mut self, const_layout: Option<Box<dyn ConstLayout>>) {
-        self.panel.set_const_layout(const_layout);
-    }
-    fn get_margin(&self) -> &Direction {
-        self.panel.get_margin()
-    }
-    fn get_padding(&self) -> &Direction {
-        self.panel.get_padding()
-    }
-    fn set_default_settings(&mut self, settings: &Settings) {
+
+    fn set_default_settings(&mut self, settings: &Settings) -> &mut dyn Drawable {
         self.panel.set_default_settings(settings);
+        self
     }
 
     fn as_base(&self) -> &Base {
@@ -498,7 +533,7 @@ impl Drawable for Label {
         self.panel.as_base_mut()
     }
 
-    fn as_panel_control_mut(&mut self) -> Option<&mut dyn PanelControl> {
+    fn as_panel_control_mut(&mut self) -> &mut dyn PanelControl {
         self.panel.as_panel_control_mut()
     }
 
@@ -509,25 +544,38 @@ impl Drawable for Label {
         Some(self)
     }
 
-    fn as_clickable(&mut self) -> Option<&mut dyn ClickableDrawable> {
+    fn as_clickable(&self) -> Option<&dyn ClickableDrawable> {
         self.panel.as_clickable()
     }
-    fn as_hoverable(&mut self) -> Option<&mut dyn HoverableDrawable> {
+    fn as_clickable_mut(&mut self) -> Option<&mut dyn ClickableDrawable> {
+        self.panel.as_clickable_mut()
+    }
+
+    fn as_hoverable(&self) -> Option<&dyn HoverableDrawable> {
         self.panel.as_hoverable()
     }
-    fn as_selectable(&mut self) -> Option<&mut dyn SelectableDrawable> {
+    fn as_hoverable_mut(&mut self) -> Option<&mut dyn HoverableDrawable> {
+        self.panel.as_hoverable_mut()
+    }
+
+    fn as_selectable(&self) -> Option<&dyn SelectableDrawable> {
         Some(self)
     }
-    fn as_with_animation(&mut self) -> Option<&mut dyn AnimationDrawable> {
+    fn as_selectable_mut(&mut self) -> Option<&mut dyn SelectableDrawable> {
+        Some(self)
+    }
+
+    fn as_with_animation(&self) -> Option<&dyn AnimationDrawable> {
         self.panel.as_with_animation()
     }
-    fn as_scrollable(&mut self) -> Option<&mut dyn super::interface::drawable::ScrollableDrawable> {
+    fn as_with_animation_mut(&mut self) -> Option<&mut dyn AnimationDrawable> {
+        self.panel.as_with_animation_mut()
+    }
+
+    fn as_scrollable(&self) -> Option<&dyn ScrollableDrawable> {
         self.panel.as_scrollable()
     }
-}
-
-impl PanelControl for Label {
-    fn set_background(&mut self, color: u32) {
-        self.panel.set_background(color);
+    fn as_scrollable_mut(&mut self) -> Option<&mut dyn ScrollableDrawable> {
+        self.panel.as_scrollable_mut()
     }
 }

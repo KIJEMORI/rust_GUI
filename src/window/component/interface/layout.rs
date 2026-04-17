@@ -1,5 +1,7 @@
 use crate::window::component::{
-    base::area::Rect, interface::const_layout::ConstLayout, layout::const_base_layout::Direction,
+    base::area::Rect,
+    interface::const_layout::ConstLayout,
+    layout::{base_layout::Align, const_base_layout::Direction},
 };
 
 #[allow(dead_code)]
@@ -18,4 +20,5 @@ pub trait Layout {
     fn get_padding(&self) -> &Direction;
     fn get_margin(&self) -> &Direction;
     fn set_const_layout(&mut self, const_layout: Option<Box<dyn ConstLayout>>);
+    fn set_align(&mut self, align: Align);
 }

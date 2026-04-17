@@ -9,7 +9,7 @@ use crate::window::component::{
     interface::drawable::Drawable,
 };
 pub struct Base {
-    pub id: String,
+    pub id: u32,
     pub rect: Rect<f32, u16>,
     pub visible: bool,
     pub settings: Settings,
@@ -21,9 +21,9 @@ pub struct Base {
 
 #[allow(dead_code)]
 impl Base {
-    pub fn new(id: String, rect: Rect<f32, u16>) -> Base {
+    pub fn new(rect: Rect<f32, u16>) -> Base {
         Base {
-            id: id,
+            id: 0,
             rect: rect,
             visible: true,
             settings: get_settings(),

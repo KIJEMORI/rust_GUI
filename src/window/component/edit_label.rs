@@ -13,11 +13,13 @@ use crate::{
         },
         interface::{
             component_control::{FullEditControl, LabelControl, PanelControl},
-            const_layout::ConstLayout,
-            drawable::{AnimationDrawable, Drawable},
+            drawable::{
+                AnimationDrawable, ClickableDrawable, Drawable, HoverableDrawable, LayoutDrawable,
+                ScrollableDrawable, SelectableDrawable,
+            },
         },
         label::Label,
-        layout::{const_base_layout::Direction, layout_context::LayoutContext},
+        layout::layout_context::LayoutContext,
     },
 };
 
@@ -31,11 +33,11 @@ impl EditLabel {
         let mut label = Label::new(text.to_string());
 
         label
-            .as_clickable()
+            .as_clickable_mut()
             .unwrap()
             .set_on_click(UiCommand::EditLabel(None));
 
-        label.as_scrollable().unwrap().set_scrolable();
+        label.as_scrollable_mut().unwrap().set_scrolable();
 
         let mut steps = Vec::new();
         let on_cursor = |el: SharedDrawable| {
@@ -66,7 +68,7 @@ impl EditLabel {
             last_tick: Instant::now(),
         };
 
-        if let Some(with_animation) = label.as_with_animation() {
+        if let Some(with_animation) = label.as_with_animation_mut() {
             with_animation.set_animation(vec![animation]);
         }
 
@@ -95,23 +97,12 @@ impl Drawable for EditLabel {
 
     add_drawable_control!();
 
-    fn set_padding(&mut self, direction: Direction) {
-        self.label.set_padding(direction);
-    }
-    fn set_margin(&mut self, direction: Direction) {
-        self.label.set_margin(direction);
-    }
-    fn set_const_layout(&mut self, const_layout: Option<Box<dyn ConstLayout>>) {
-        self.label.set_const_layout(const_layout);
-    }
-    fn get_margin(&self) -> &Direction {
-        self.label.get_margin()
-    }
-    fn get_padding(&self) -> &Direction {
-        self.label.get_padding()
-    }
-    fn set_default_settings(&mut self, settings: &super::base::settings::Settings) {
+    fn set_default_settings(
+        &mut self,
+        settings: &super::base::settings::Settings,
+    ) -> &mut dyn Drawable {
         self.label.set_default_settings(settings);
+        self
     }
     fn under(&self, mx: u16, my: u16) -> bool {
         self.label.under(mx, my)
@@ -119,9 +110,16 @@ impl Drawable for EditLabel {
     fn hover(&self, mx: u16, my: u16) -> bool {
         self.label.hover(mx, my)
     }
-    fn as_panel_control_mut(&mut self) -> Option<&mut dyn PanelControl> {
+    fn as_panel_control_mut(&mut self) -> &mut dyn PanelControl {
         self.label.as_panel_control_mut()
     }
+    fn as_layout_control(&self) -> &dyn LayoutDrawable {
+        self.label.as_layout_control()
+    }
+    fn as_layout_control_mut(&mut self) -> &mut dyn LayoutDrawable {
+        self.label.as_layout_control_mut()
+    }
+
     fn as_label_control_mut(&mut self) -> Option<&mut dyn LabelControl> {
         self.label.as_label_control_mut()
     }
@@ -131,22 +129,42 @@ impl Drawable for EditLabel {
     fn as_base_mut(&mut self) -> &mut Base {
         self.label.as_base_mut()
     }
-    fn as_clickable(&mut self) -> Option<&mut dyn super::interface::drawable::ClickableDrawable> {
+    fn as_clickable(&self) -> Option<&dyn ClickableDrawable> {
         self.label.as_clickable()
     }
-    fn as_hoverable(&mut self) -> Option<&mut dyn super::interface::drawable::HoverableDrawable> {
+    fn as_clickable_mut(&mut self) -> Option<&mut dyn ClickableDrawable> {
+        self.label.as_clickable_mut()
+    }
+
+    fn as_hoverable(&self) -> Option<&dyn HoverableDrawable> {
         self.label.as_hoverable()
     }
-    fn as_selectable(&mut self) -> Option<&mut dyn super::interface::drawable::SelectableDrawable> {
+    fn as_hoverable_mut(&mut self) -> Option<&mut dyn HoverableDrawable> {
+        self.label.as_hoverable_mut()
+    }
+
+    fn as_selectable(&self) -> Option<&dyn SelectableDrawable> {
         self.label.as_selectable()
     }
-    fn as_with_animation(&mut self) -> Option<&mut dyn AnimationDrawable> {
+    fn as_selectable_mut(&mut self) -> Option<&mut dyn SelectableDrawable> {
+        self.label.as_selectable_mut()
+    }
+
+    fn as_with_animation(&self) -> Option<&dyn AnimationDrawable> {
         self.label.as_with_animation()
     }
+    fn as_with_animation_mut(&mut self) -> Option<&mut dyn AnimationDrawable> {
+        self.label.as_with_animation_mut()
+    }
+
     fn as_edit_label_control_mut(&mut self) -> Option<&mut dyn FullEditControl> {
         self.label.as_edit_label_control_mut()
     }
-    fn as_scrollable(&mut self) -> Option<&mut dyn super::interface::drawable::ScrollableDrawable> {
+
+    fn as_scrollable(&self) -> Option<&dyn ScrollableDrawable> {
         self.label.as_scrollable()
+    }
+    fn as_scrollable_mut(&mut self) -> Option<&mut dyn ScrollableDrawable> {
+        self.label.as_scrollable_mut()
     }
 }

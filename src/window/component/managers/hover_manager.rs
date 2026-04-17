@@ -1,10 +1,8 @@
-use std::rc::{Rc, Weak};
-
-use crate::window::component::base::component_type::{SharedDrawable, WeakSharedDrawable};
+use crate::window::component::managers::id_manager::IDManager;
 
 pub struct HoverManager {
-    hovered_element: Option<WeakSharedDrawable>,
-    items: Vec<WeakSharedDrawable>,
+    hovered_element: Option<u32>,
+    items: Vec<u32>,
 }
 
 impl Default for HoverManager {
@@ -17,44 +15,55 @@ impl Default for HoverManager {
 }
 
 impl HoverManager {
-    pub fn add(&mut self, item: SharedDrawable) {
-        let item = Rc::downgrade(&item);
-        if !self.items.iter().any(|x| Weak::ptr_eq(x, &item)) {
+    pub fn add(&mut self, item: u32) {
+        if !self.items.iter().any(|x| x == &item) {
             self.items.push(item);
         }
     }
-    pub fn hover(&mut self, mx: u16, my: u16) {
+    pub fn hover(&mut self, mx: u16, my: u16, id_manager: &IDManager) {
         let mut hovered_is_none = self.hovered_element.is_none();
 
+        let mut item_removed = false;
+
         if !hovered_is_none {
-            if let Some(item) = &self.hovered_element {
-                if let Some(item) = item.upgrade() {
-                    if item.borrow().hover(mx, my) {
+            if let Some(id) = &self.hovered_element {
+                if let Some(item) = id_manager.get_upgraded(id) {
+                    let item = item.borrow();
+                    if item.hover(mx, my) {
                         return;
                     } else {
-                        if let Some(hoverable) = item.borrow_mut().as_hoverable() {
+                        if let Some(hoverable) = item.as_hoverable() {
                             hoverable.on_mouse_leave();
                         }
                         hovered_is_none = true;
                     }
+                } else {
+                    hovered_is_none = true;
+                    item_removed = true;
                 }
             }
         }
         if hovered_is_none {
             self.hovered_element = None;
-            for item in self.items.iter().rev() {
-                if let Some(item) = item.upgrade() {
-                    if item.borrow().hover(mx, my) {
-                        self.hovered_element = Some(Rc::downgrade(&item));
-                        if let Some(hoverable) = item.borrow_mut().as_hoverable() {
+            for id in self.items.iter().rev() {
+                if let Some(item) = id_manager.get_upgraded(id) {
+                    let item = item.borrow();
+                    if item.hover(mx, my) {
+                        self.hovered_element = Some(id.clone());
+                        if let Some(hoverable) = item.as_hoverable() {
                             hoverable.on_mouse_enter();
                         }
                         break;
                     }
+                } else {
+                    item_removed = true;
                 }
             }
         }
 
-        self.items.retain(|x| x.strong_count() > 0);
+        if item_removed {
+            self.items
+                .retain(|id| id_manager.get_upgraded(id).is_some());
+        }
     }
 }

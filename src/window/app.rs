@@ -91,14 +91,3 @@ impl ComponentControl for App {
         }
     }
 }
-
-impl PanelControl for App {
-    fn set_background(&mut self, color: u32) {
-        if self.app.is_some() {
-            self.app.as_mut().unwrap().set_background(color);
-        } else {
-            self.app = Some(AppWinit::default());
-            self.app.as_mut().unwrap().set_background(color);
-        }
-    }
-}

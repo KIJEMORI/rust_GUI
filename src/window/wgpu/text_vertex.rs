@@ -1,6 +1,5 @@
 use std::{
-    hash::{DefaultHasher, Hash, Hasher},
-    ops::Range,
+    hash::{Hash, Hasher},
     time::Instant,
 };
 
@@ -77,7 +76,7 @@ fn push_glyph_vertices(
             p_a: uvs[i],
             p_b: [0.0, 0.0],
             color,
-            params: [0.0, 2.0, 0.0, 0.0],
+            params: [0.0, SHAPE_TEXT, 0.0, 0.0],
             border_color: [0.0, 0.0, 0.0, 0.0],
         });
     }
@@ -87,9 +86,9 @@ pub struct GPUTextVertex {
     // Vertex Label Buffers
     // pub text_vertex_buffer: wgpu::Buffer,
     // pub text_index_buffer: wgpu::Buffer,
-    pub section_offsets: Vec<Range<usize>>,
+    // pub section_offsets: Vec<Range<usize>>,
     pub section_hashes: Vec<u64>,
-    pub section_capacities: Vec<usize>,
+    // pub section_capacities: Vec<usize>,
     // Pipeline Label
     // pub text_pipeline: wgpu::RenderPipeline,
     // pub bind_group: wgpu::BindGroup,
@@ -105,7 +104,7 @@ pub struct GPUTextVertex {
     pub last_base_idx: u32,
 }
 
-use wgpu::{Buffer, Device, Queue, SurfaceConfiguration, util::DeviceExt};
+use wgpu::Device;
 
 use crate::window::{
     component::{
@@ -113,18 +112,13 @@ use crate::window::{
         managers::atlas_manager::AtlasManager,
     },
     wgpu::{
-        draw_args::{DrawIndexedIndirectArgs, DrawIndirectArgs},
-        shape_vertex::ShapeVertex,
+        shape_vertex::{SHAPE_TEXT, ShapeVertex},
         uber_resourse_manager::UberResourceManager,
-        wgpu_state::{MAX_INDICES, MAX_VERTICES},
     },
 };
 
 impl GPUTextVertex {
-    pub fn new(device: &Device, config: &SurfaceConfiguration, uniform_buffer: &Buffer) -> Self {
-        // let text_shader =
-        //     device.create_shader_module(wgpu::include_wgsl!("shaders/high/label_shader.wgsl"));
-
+    pub fn new(device: &Device) -> Self {
         let font = include_bytes!("../component/base/Fonts/Roboto-Black.ttf");
 
         let atlas_manager = AtlasManager::new(&device, font, 2048);
@@ -177,12 +171,12 @@ impl GPUTextVertex {
             label: Some("Text Bind Group"),
         });
 
-        let draw_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Draw Vertex Buffer"),
-            size: MAX_VERTICES * std::mem::size_of::<DrawIndirectArgs>() as u64,
-            usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        // let draw_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        //     label: Some("Draw Vertex Buffer"),
+        //     size: MAX_VERTICES * std::mem::size_of::<DrawIndirectArgs>() as u64,
+        //     usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
+        //     mapped_at_creation: false,
+        // });
 
         // let mut indices = Vec::with_capacity(MAX_INDICES as usize);
         // for i in (0..(MAX_VERTICES as u32)).step_by(4) {
@@ -205,9 +199,9 @@ impl GPUTextVertex {
         Self {
             // text_vertex_buffer: text_vertex_buffer,
             atlas: atlas_manager,
-            section_offsets: Vec::with_capacity(1024),
+            //section_offsets: Vec::with_capacity(1024),
             section_hashes: Vec::with_capacity(1024),
-            section_capacities: Vec::with_capacity(1024),
+            //section_capacities: Vec::with_capacity(1024),
             // text_pipeline: text_pipeline,
             text_bind_group_layout: text_bind_group_layout,
             text_bind_group: text_bind_group,
@@ -222,190 +216,46 @@ impl GPUTextVertex {
         }
     }
 
-    pub fn ensure_gpu_capacity(
-        &mut self,
-        required_count: usize,
-        device: &Device,
-        queue: &Queue,
-        shape_vertex_buffer: &mut wgpu::Buffer,
-    ) -> bool {
-        let required_size = (required_count * std::mem::size_of::<ShapeVertex>()) as u64;
-        let current_capacity = shape_vertex_buffer.size();
+    // pub fn is_defrag_worth_it(&self) -> bool {
+    //     let total_capacity: usize = self.section_capacities.iter().sum();
+    //     let total_actual: usize = self.section_offsets.iter().map(|r| r.end - r.start).sum();
+    //     // Чистим, если "пустоты" больше 30%
+    //     total_capacity > (total_actual as f32 * 1.3) as usize && total_capacity > 50_000
+    // }
 
-        if required_size > current_capacity {
-            let new_size = required_size.next_power_of_two();
-            let new_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Expanded Vertex Buffer"),
-                size: new_size,
-                usage: wgpu::BufferUsages::VERTEX
-                    | wgpu::BufferUsages::COPY_DST
-                    | wgpu::BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            });
+    // pub fn perform_true_defragmentation(
+    //     &mut self,
+    //     device: &Device,
+    //     queue: &Queue,
+    //     manager: &mut UberResourceManager,
+    //     shapes_end_vertex: usize, // Где кончаются прямоугольники в этом кадре
+    // ) {
+    //     let mut current_offset = shapes_end_vertex;
+    //     let mut encoder =
+    //         device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-            let mut encoder =
-                device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-            encoder.copy_buffer_to_buffer(shape_vertex_buffer, 0, &new_buffer, 0, current_capacity);
+    //     for i in 0..self.section_offsets.len() {
+    //         let len = self.section_offsets[i].end - self.section_offsets[i].start;
+    //         if len > 0 {
+    //             let src_offset =
+    //                 (self.section_offsets[i].start as u64) * UberResourceManager::VERTEX_SIZE;
+    //             let dst_offset = (current_offset as u64) * UberResourceManager::VERTEX_SIZE;
 
-            queue.submit(std::iter::once(encoder.finish()));
+    //             encoder.copy_buffer_to_buffer(
+    //                 &manager.vertex_buffer,
+    //                 src_offset,
+    //                 &manager.vertex_buffer,
+    //                 dst_offset,
+    //                 (len as u64) * UberResourceManager::VERTEX_SIZE,
+    //             );
 
-            // Просто подменяем. wgpu удалит старый буфер, когда GPU закончит копирование.
-            *shape_vertex_buffer = new_buffer;
-            println!("GPU Buffer Expanded to {} bytes", new_size);
-            return true;
-        }
-        false
-    }
-
-    pub fn update_section_direct_gpu(
-        &mut self,
-        s_idx: usize,
-        new_verts: &[ShapeVertex], // 1. Используем срез, чтобы избежать владения/аллокаций
-        device: &Device,
-        queue: &Queue,
-        shape_vertex_buffer: &mut wgpu::Buffer,
-        next_free_vertex: &mut usize,
-    ) -> bool {
-        // Безопасное изменение размеров метаданных
-        if s_idx >= self.section_capacities.len() {
-            let new_size = s_idx + 1;
-            self.section_capacities.resize(new_size, 0);
-            self.section_offsets.resize(new_size, 0..0);
-            self.section_hashes.resize(new_size, 0);
-        }
-
-        let new_len = new_verts.len();
-        if new_len == 0 {
-            let start = self.section_offsets[s_idx].start;
-            self.section_offsets[s_idx] = start..start;
-            return false;
-        }
-
-        const VERTEX_SIZE: u64 = std::mem::size_of::<ShapeVertex>() as u64;
-
-        let needs_new_allocation =
-            self.section_capacities[s_idx] == 0 || new_len > self.section_capacities[s_idx];
-
-        if needs_new_allocation {
-            let new_padded_cap = (new_len + (new_len / 2) + 3) & !3;
-
-            // Гарантируем, что в общем буфере есть место
-            self.ensure_gpu_capacity(
-                next_free_vertex.clone() + new_padded_cap,
-                device,
-                queue,
-                shape_vertex_buffer,
-            );
-
-            let write_offset = (next_free_vertex.clone() as u64) * VERTEX_SIZE;
-
-            queue.write_buffer(
-                //&self.text_vertex_buffer,
-                shape_vertex_buffer,
-                write_offset,
-                bytemuck::cast_slice(new_verts),
-            );
-
-            self.section_offsets[s_idx] =
-                next_free_vertex.clone()..(next_free_vertex.clone() + new_len);
-            self.section_capacities[s_idx] = new_padded_cap;
-            *next_free_vertex += new_padded_cap;
-
-            return true;
-        } else {
-            let start_idx = self.section_offsets[s_idx].start;
-            let write_offset = (start_idx as u64) * VERTEX_SIZE;
-
-            queue.write_buffer(
-                //&self.text_vertex_buffer,
-                shape_vertex_buffer,
-                write_offset,
-                bytemuck::cast_slice(new_verts),
-            );
-
-            self.section_offsets[s_idx] = start_idx..(start_idx + new_len);
-        }
-        false
-    }
-
-    pub fn update_indirect_buffer(
-        &mut self,
-        _device: &Device,
-        queue: &Queue,
-        manager: &mut UberResourceManager,
-        base_idx: u32,
-    ) {
-        let commands: Vec<wgpu::util::DrawIndexedIndirectArgs> = self
-            .section_offsets
-            .iter()
-            .map(|range| wgpu::util::DrawIndexedIndirectArgs {
-                index_count: ((range.end - range.start) / 4 * 6) as u32,
-                instance_count: 1,
-                // Смещение в ИНДЕКСНОМ буфере (абсолютное)
-                first_index: (range.start as u32 / 4) * 6,
-                base_vertex: 0, // 0, так как first_index уже указывает на нужные вершины
-                first_instance: 0,
-            })
-            .collect();
-
-        if commands.is_empty() {
-            return;
-        }
-
-        // Записываем команды в indirect_buffer СРАЗУ ПОСЛЕ шейпов
-        let offset_in_bytes =
-            base_idx as u64 * std::mem::size_of::<wgpu::util::DrawIndexedIndirectArgs>() as u64;
-
-        queue.write_buffer(
-            &manager.indirect_buffer,
-            offset_in_bytes,
-            bytemuck::cast_slice(&commands),
-        );
-
-        // Важно: активное количество команд теперь = шейпы + текст
-        manager.active_shape_count = base_idx + commands.len() as u32;
-    }
-
-    pub fn is_defrag_worth_it(&self) -> bool {
-        let total_capacity: usize = self.section_capacities.iter().sum();
-        let total_actual: usize = self.section_offsets.iter().map(|r| r.end - r.start).sum();
-        // Чистим, если "пустоты" больше 30%
-        total_capacity > (total_actual as f32 * 1.3) as usize && total_capacity > 50_000
-    }
-
-    pub fn perform_true_defragmentation(
-        &mut self,
-        device: &Device,
-        queue: &Queue,
-        manager: &mut UberResourceManager,
-        shapes_end_vertex: usize, // Где кончаются прямоугольники в этом кадре
-    ) {
-        let mut current_offset = shapes_end_vertex;
-        let mut encoder =
-            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-        for i in 0..self.section_offsets.len() {
-            let len = self.section_offsets[i].end - self.section_offsets[i].start;
-            if len > 0 {
-                let src_offset =
-                    (self.section_offsets[i].start as u64) * UberResourceManager::VERTEX_SIZE;
-                let dst_offset = (current_offset as u64) * UberResourceManager::VERTEX_SIZE;
-
-                encoder.copy_buffer_to_buffer(
-                    &manager.vertex_buffer,
-                    src_offset,
-                    &manager.vertex_buffer,
-                    dst_offset,
-                    (len as u64) * UberResourceManager::VERTEX_SIZE,
-                );
-
-                self.section_offsets[i] = current_offset..(current_offset + len);
-                current_offset += len;
-            }
-        }
-        manager.next_free_vertex = current_offset;
-        queue.submit(std::iter::once(encoder.finish()));
-    }
+    //             self.section_offsets[i] = current_offset..(current_offset + len);
+    //             current_offset += len;
+    //         }
+    //     }
+    //     manager.next_free_vertex = current_offset;
+    //     queue.submit(std::iter::once(encoder.finish()));
+    // }
 
     pub fn render(
         &mut self,
@@ -423,8 +273,8 @@ impl GPUTextVertex {
             let total_cmds = base_command_idx + gpu_ctx.texts.len() as u32;
 
             // Если Vertex Buffer расширился, нужно форсировать перезапись ВСЕХ текстов
-            let was_resized = manager.ensure_vertex_capacity(device, queue, total_verts);
-            manager.ensure_index_capacity(device, queue, total_verts);
+            // let was_resized = manager.ensure_vertex_capacity(device, queue, total_verts);
+            manager.ensure_index_capacity(device, total_verts);
             manager.ensure_indirect_capacity(device, queue, total_cmds);
         }
 

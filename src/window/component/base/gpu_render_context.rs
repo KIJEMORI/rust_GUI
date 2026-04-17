@@ -1,6 +1,9 @@
 use std::ops::Range;
 
-use crate::window::{component::base::area::Rect, wgpu::shape_vertex::ShapeVertex};
+use crate::window::{
+    component::{base::area::Rect, theme::border::Border},
+    wgpu::shape_vertex::{SHAPE_LINE, SHAPE_RECT, ShapeVertex},
+};
 
 pub struct GpuRenderContext {
     //pub vertices: Vec<Vertex>,
@@ -15,6 +18,7 @@ pub struct GpuRenderContext {
 pub enum GpuCommand {
     Shape(Section),
     Text(Section),
+    Unmask(Section),
 }
 
 pub struct Section {
@@ -49,9 +53,6 @@ impl GpuRenderContext {
             color: u32_to_rgba(color),
         });
 
-        let current_command_idx =
-            self.shape_section_offsets.len() as u32 + (self.texts.len() - 1) as u32;
-
         self.command_sections.push(GpuCommand::Text(Section {
             level,
             command_index: 0,
@@ -71,6 +72,7 @@ impl GpuRenderContext {
         border_color: [f32; 4],
         level: u32,
         is_clip: bool,
+        un_mask: bool,
     ) {
         let aa_padding = 2.0; // Запас для сглаживания
         let final_min = [min_p[0] - aa_padding, min_p[1] - aa_padding];
@@ -100,42 +102,36 @@ impl GpuRenderContext {
 
         self.shape_section_offsets.push(start_vertex..end_vertex);
 
-        let start_vertex = start_vertex as u32;
-
-        let indices = [
-            start_vertex + 0,
-            start_vertex + 1,
-            start_vertex + 2,
-            start_vertex + 2,
-            start_vertex + 1,
-            start_vertex + 3,
-        ];
-        //self.shape_indices.extend_from_slice(&indices);
-
-        let current_command_idx = (self.shape_section_offsets.len() - 1) as u32;
-
-        // Первая секция
-        self.command_sections.push(GpuCommand::Shape(Section {
-            level: level,
-            command_index: 0,
-            command_count: 1,
-            is_mask: is_clip,
-        }));
+        if un_mask {
+            self.command_sections.push(GpuCommand::Unmask(Section {
+                level: level,
+                command_index: 0,
+                command_count: 1,
+                is_mask: is_clip,
+            }));
+        } else {
+            self.command_sections.push(GpuCommand::Shape(Section {
+                level: level,
+                command_index: 0,
+                command_count: 1,
+                is_mask: is_clip,
+            }));
+        }
     }
 
     pub fn push_rect_sdf(
         &mut self,
         rect: &Rect<f32, u16>,
         color: u32,
-        radius: f32,
-        border: (u32, f32),
+        border: &Border,
         level: u32,
         is_clip: bool,
+        un_mask: bool,
     ) {
-        let x1 = rect.x1 as f32;
-        let y1 = rect.y1 as f32;
-        let x2 = rect.get_x2() as f32;
-        let y2 = rect.get_y2() as f32;
+        let x1 = rect.x1;
+        let y1 = rect.y1;
+        let x2 = rect.get_x2();
+        let y2 = rect.get_y2();
 
         let color_rgba = u32_to_rgba(color);
 
@@ -145,7 +141,7 @@ impl GpuRenderContext {
         let center = [x1 + width * 0.5, y1 + height * 0.5];
         let size = [width, height];
 
-        let border_color = u32_to_rgba(border.0);
+        let border_color = u32_to_rgba(border.color);
 
         self.push_shape(
             [x1, y1],
@@ -153,10 +149,11 @@ impl GpuRenderContext {
             center,
             size,
             color_rgba,
-            [radius, 0.0, 1.0, border.1],
+            [border.radius, SHAPE_RECT, 1.0, border.width],
             border_color,
             level,
             is_clip,
+            un_mask,
         );
     }
 
@@ -167,7 +164,7 @@ impl GpuRenderContext {
         end_p: [f32; 2],
         thickness: f32,
         color: u32,
-        border: (u32, f32),
+        border: &Border,
         level: u32,
         is_clip: bool,
     ) {
@@ -180,7 +177,7 @@ impl GpuRenderContext {
         let x2 = start_p[0].max(end_p[0]) + pad;
         let y2 = start_p[1].max(end_p[1]) + pad;
 
-        let border_color = u32_to_rgba(border.0);
+        let border_color = u32_to_rgba(border.color);
 
         // params: [половина толщины, тип: 1.0 (LINE), сглаживание: 1.0, 0.0]
         self.push_shape(
@@ -189,10 +186,11 @@ impl GpuRenderContext {
             start_p,  // p_a
             end_p,    // p_b
             color_rgba,
-            [thickness * 0.5, 1.0, 1.0, border.1],
+            [thickness * 0.5, SHAPE_LINE, 1.0, border.width],
             border_color,
             level,
             is_clip,
+            false,
         );
     }
 

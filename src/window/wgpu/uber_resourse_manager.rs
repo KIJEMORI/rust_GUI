@@ -1,7 +1,7 @@
-use wgpu::{Device, SurfaceConfiguration, util::DeviceExt};
+use wgpu::{Device, util::DeviceExt};
 
 use crate::window::wgpu::{
-    draw_args::{DrawIndexedIndirectArgs, DrawIndirectArgs},
+    draw_args::DrawIndexedIndirectArgs,
     shape_vertex::ShapeVertex,
     wgpu_state::{MAX_INDICES, MAX_VERTICES},
 };
@@ -24,7 +24,7 @@ impl UberResourceManager {
         self.active_shape_count = 0;
     }
 
-    pub fn new(device: &Device, config: &SurfaceConfiguration) -> Self {
+    pub fn new(device: &Device) -> Self {
         let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Panel Vertex Buffer"),
             size: MAX_VERTICES * std::mem::size_of::<ShapeVertex>() as u64,
@@ -134,12 +134,7 @@ impl UberResourceManager {
     }
 
     /// Проверяет и расширяет Index Buffer (ВАЖНО для больших объемов данных)
-    pub fn ensure_index_capacity(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        required_verts: usize,
-    ) {
+    pub fn ensure_index_capacity(&mut self, device: &wgpu::Device, required_verts: usize) {
         let required_indices = (required_verts / 4 * 6) as u64;
         let current_indices_count = self.index_buffer.size() / 4;
 

@@ -11,9 +11,9 @@ pub struct ShapeVertex {
 }
 
 // Типы фигур для params.y
-const SHAPE_RECT: f32 = 0.0;
-const SHAPE_LINE: f32 = 1.0;
-const SHAPE_TEXT: f32 = 2.0;
+pub const SHAPE_RECT: f32 = 0.0;
+pub const SHAPE_LINE: f32 = 1.0;
+pub const SHAPE_TEXT: f32 = 2.0;
 
 impl ShapeVertex {
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
@@ -39,6 +39,7 @@ pub struct GPUShapeVertex {
     // pub vertex_index_buffer: wgpu::Buffer,
     pub mask_pipeline: wgpu::RenderPipeline,
     pub content_pipeline: wgpu::RenderPipeline,
+    pub unmask_pipeline: wgpu::RenderPipeline,
     pub bind_group: wgpu::BindGroup,
     // Inderected Args Shape
     //pub shape_indirect_buffer: wgpu::Buffer,
@@ -49,15 +50,11 @@ pub struct GPUShapeVertex {
 
 use std::ops::Range;
 
-use wgpu::{BindGroupLayout, Buffer, Device, Queue, SurfaceConfiguration, util::DeviceExt};
+use wgpu::{BindGroupLayout, Buffer, Device, Queue, SurfaceConfiguration};
 
 use crate::window::{
     component::base::gpu_render_context::{GpuCommand, GpuRenderContext},
-    wgpu::{
-        draw_args::{DrawIndexedIndirectArgs, DrawIndirectArgs},
-        uber_resourse_manager::UberResourceManager,
-        wgpu_state::{MAX_INDICES, MAX_VERTICES},
-    },
+    wgpu::{draw_args::DrawIndexedIndirectArgs, uber_resourse_manager::UberResourceManager},
 };
 
 impl GPUShapeVertex {
@@ -193,30 +190,77 @@ impl GPUShapeVertex {
             cache: None,
         });
 
-        let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Panel Vertex Buffer"),
-            size: MAX_VERTICES * std::mem::size_of::<ShapeVertex>() as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, // ОБЯЗАТЕЛЬНО VERTEX
-            mapped_at_creation: false,
+        let unmask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Unmask Pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[ShapeVertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(), // ДОБАВИТЬ
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::empty(),
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(), // Рисуем треугольники
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth24PlusStencil8,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always, // Игнорируем глубину
+                stencil: wgpu::StencilState {
+                    front: wgpu::StencilFaceState {
+                        compare: wgpu::CompareFunction::Equal,
+                        pass_op: wgpu::StencilOperation::DecrementClamp,
+                        fail_op: wgpu::StencilOperation::Keep,
+                        depth_fail_op: wgpu::StencilOperation::Keep,
+                    },
+                    back: wgpu::StencilFaceState {
+                        compare: wgpu::CompareFunction::Equal,
+                        pass_op: wgpu::StencilOperation::DecrementClamp,
+                        fail_op: wgpu::StencilOperation::Keep,
+                        depth_fail_op: wgpu::StencilOperation::Keep,
+                    },
+                    read_mask: 0xFF,
+                    write_mask: 0xFF,
+                },
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
         });
 
-        let mut indices = Vec::with_capacity(MAX_INDICES as usize);
-        for i in (0..(MAX_VERTICES as u32)).step_by(4) {
-            indices.extend_from_slice(&[
-                i + 0,
-                i + 1,
-                i + 2, // Первый треугольник
-                i + 2,
-                i + 1,
-                i + 3, // Второй треугольник
-            ]);
-        }
+        // let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        //     label: Some("Panel Vertex Buffer"),
+        //     size: MAX_VERTICES * std::mem::size_of::<ShapeVertex>() as u64,
+        //     usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, // ОБЯЗАТЕЛЬНО VERTEX
+        //     mapped_at_creation: false,
+        // });
 
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Text Static Index Buffer"),
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        // let mut indices = Vec::with_capacity(MAX_INDICES as usize);
+        // for i in (0..(MAX_VERTICES as u32)).step_by(4) {
+        //     indices.extend_from_slice(&[
+        //         i + 0,
+        //         i + 1,
+        //         i + 2, // Первый треугольник
+        //         i + 2,
+        //         i + 1,
+        //         i + 3, // Второй треугольник
+        //     ]);
+        // }
+
+        // let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        //     label: Some("Text Static Index Buffer"),
+        //     contents: bytemuck::cast_slice(&indices),
+        //     usage: wgpu::BufferUsages::INDEX,
+        // });
 
         // let index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         //     label: Some("Panel Index Buffer"),
@@ -225,18 +269,19 @@ impl GPUShapeVertex {
         //     mapped_at_creation: false,
         // });
 
-        let shape_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Draw Vertex Buffer"),
-            size: MAX_VERTICES * std::mem::size_of::<DrawIndirectArgs>() as u64,
-            usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        // let shape_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        //     label: Some("Draw Vertex Buffer"),
+        //     size: MAX_VERTICES * std::mem::size_of::<DrawIndirectArgs>() as u64,
+        //     usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
+        //     mapped_at_creation: false,
+        // });
 
         Self {
             // vertex_buffer: vertex_buffer,
             // vertex_index_buffer: index_buffer,
             mask_pipeline: mask_pipeline,
             content_pipeline: content_pipeline,
+            unmask_pipeline: unmask_pipeline,
             bind_group: bind_group,
             // shape_indirect_buffer: shape_buffer,
             // shape_section_offsets: Vec::new(),
@@ -329,17 +374,16 @@ impl GPUShapeVertex {
             let required_cmds = gpu_ctx.shape_section_offsets.len() as u32;
 
             manager.ensure_vertex_capacity(device, queue, required_verts);
-            manager.ensure_index_capacity(device, queue, required_verts);
+            manager.ensure_index_capacity(device, required_verts);
             manager.ensure_indirect_capacity(device, queue, required_cmds);
         }
-        // 1. Пишем вершины
+
         queue.write_buffer(
             &manager.vertex_buffer,
             0,
             bytemuck::cast_slice(&gpu_ctx.shape_vertices),
         );
 
-        // 2. Проставляем индексы командам шейпов, чтобы они не путались с текстом
         let mut shape_idx = 0;
         for cmd in &mut gpu_ctx.command_sections {
             if let GpuCommand::Shape(s) = cmd {
@@ -348,7 +392,6 @@ impl GPUShapeVertex {
             }
         }
 
-        // 3. Пишем команды в буфер
         self.update_shape_indirect_buffer(&gpu_ctx.shape_section_offsets, device, queue, manager);
 
         manager.next_free_vertex = len;

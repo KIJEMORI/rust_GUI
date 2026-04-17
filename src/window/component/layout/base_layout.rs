@@ -3,10 +3,16 @@ use crate::window::component::interface::const_layout::ConstLayout;
 use crate::window::component::interface::layout::Layout;
 use crate::window::component::layout::const_base_layout::Direction;
 
+pub enum Align {
+    FreeRun,
+    Base,
+}
+
 pub struct BaseLayout {
     margin: Direction,
     padding: Direction,
     const_layout: Option<Box<dyn ConstLayout>>,
+    pub align: Align,
 }
 
 impl BaseLayout {
@@ -21,6 +27,7 @@ impl Default for BaseLayout {
             margin: Direction::default(),
             padding: Direction::default(),
             const_layout: None,
+            align: Align::Base,
         }
     }
 }
@@ -44,10 +51,15 @@ impl Layout for BaseLayout {
     fn calculate(&self, area: &Rect<f32, u16>, parent_area: &Rect<f32, u16>) -> Rect<f32, u16> {
         let mut area = area.clone();
 
-        area.set_position(
-            (parent_area.x1 + self.margin.left as f32).round(),
-            (parent_area.y1 + self.margin.up as f32).round(),
-        );
+        match self.align {
+            Align::Base => {
+                area.set_position(
+                    (parent_area.x1 + self.margin.left as f32).round(),
+                    (parent_area.y1 + self.margin.up as f32).round(),
+                );
+            }
+            Align::FreeRun => {}
+        }
 
         if let Some(const_layout) = &self.const_layout {
             let width = const_layout.as_ref().get_width(
@@ -114,5 +126,8 @@ impl Layout for BaseLayout {
             ),
             true,
         )
+    }
+    fn set_align(&mut self, align: Align) {
+        self.align = align;
     }
 }

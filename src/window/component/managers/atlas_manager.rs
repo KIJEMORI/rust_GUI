@@ -71,7 +71,9 @@ impl AtlasManager {
 
         let (metrics, pixels) = self.font.rasterize(c, 64.0);
 
-        self.add_to_pending(c, metrics, pixels)
+        let sdf_pixels = Self::generate_sdf(&pixels, metrics.width, metrics.height, 8);
+
+        self.add_to_pending(c, metrics, sdf_pixels)
     }
 
     fn add_to_pending(
@@ -160,5 +162,56 @@ impl AtlasManager {
         // Очищаем всё ПОСЛЕ того как всё отправили
         self.pending_metadata.clear();
         self.pending_pixels.clear();
+    }
+    fn generate_sdf(pixels: &[u8], width: usize, height: usize, radius: usize) -> Vec<u8> {
+        let size = width * height;
+        let mut sdf_data = vec![0u8; size];
+        if size == 0 {
+            return sdf_data;
+        }
+
+        let max_dist = radius as f32;
+
+        for y in 0..height {
+            for x in 0..width {
+                let idx = y * width + x;
+                let is_inside = pixels[idx] > 127;
+
+                // Ищем ближайший пиксель противоположного цвета в квадрате radius
+                let mut min_dist_sq = max_dist * max_dist;
+
+                let y_start = (y as isize - radius as isize).max(0) as usize;
+                let y_end = (y + radius).min(height - 1);
+                let x_start = (x as isize - radius as isize).max(0) as usize;
+                let x_end = (x + radius).min(width - 1);
+
+                for ny in y_start..=y_end {
+                    for nx in x_start..=x_end {
+                        let n_idx = ny * width + nx;
+                        let n_inside = pixels[n_idx] > 127;
+
+                        if is_inside != n_inside {
+                            let dx = x as f32 - nx as f32;
+                            let dy = y as f32 - ny as f32;
+                            let d_sq = dx * dx + dy * dy;
+                            if d_sq < min_dist_sq {
+                                min_dist_sq = d_sq;
+                            }
+                        }
+                    }
+                }
+
+                let dist = min_dist_sq.sqrt();
+                // Нормализуем: 0.5 (128) - край, >128 - внутри, <128 - снаружи
+                let norm_dist = if is_inside {
+                    0.5 + (dist / max_dist) * 0.5
+                } else {
+                    0.5 - (dist / max_dist) * 0.5
+                };
+
+                sdf_data[idx] = (norm_dist.clamp(0.0, 1.0) * 255.0) as u8;
+            }
+        }
+        sdf_data
     }
 }

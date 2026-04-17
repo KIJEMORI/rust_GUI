@@ -21,15 +21,3 @@ impl AnimationSequence {
         self.is_running = true;
     }
 }
-
-pub struct Animation {
-    pub animation: Vec<AnimationSequence>,
-}
-
-impl Default for Animation {
-    fn default() -> Self {
-        Self {
-            animation: Vec::new(),
-        }
-    }
-}

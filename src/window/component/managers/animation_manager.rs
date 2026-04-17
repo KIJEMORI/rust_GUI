@@ -1,12 +1,12 @@
-use std::{rc::Rc, sync::mpsc::Sender, time::Instant};
+use std::{sync::mpsc::Sender, time::Instant};
 
 use crate::window::component::{
-    animation::animation_action::AnimationSequence,
-    base::{component_type::SharedDrawable, ui_command::UiCommand},
+    animation::animation_action::AnimationSequence, base::ui_command::UiCommand,
+    managers::id_manager::IDManager,
 };
 
 pub struct AnimationManager {
-    pub active: Vec<(SharedDrawable, AnimationSequence)>,
+    pub active: Vec<(u32, AnimationSequence)>,
 }
 
 impl Default for AnimationManager {
@@ -16,21 +16,21 @@ impl Default for AnimationManager {
 }
 
 impl AnimationManager {
-    pub fn start(&mut self, item: SharedDrawable) {
-        if let Some((_, seq)) = self
-            .active
-            .iter_mut()
-            .find(|(target, _)| Rc::ptr_eq(target, &item))
-        {
+    pub fn start(&mut self, id: &u32, id_manager: &IDManager) {
+        if let Some((_, seq)) = self.active.iter_mut().find(|(target, _)| target == id) {
             seq.reset();
             return;
         } else {
             let now = Instant::now();
 
             let animations_to_add = {
-                item.borrow_mut()
-                    .as_with_animation()
-                    .map(|e| e.get_animations().to_vec())
+                if let Some(item) = id_manager.get_upgraded(id) {
+                    item.borrow_mut()
+                        .as_with_animation()
+                        .map(|e| e.get_animations().to_vec())
+                } else {
+                    None
+                }
             };
 
             if let Some(animations) = animations_to_add {
@@ -38,21 +38,23 @@ impl AnimationManager {
                     anim.last_tick = now;
                     anim.is_running = true;
                     anim.current_step = 0;
-                    self.active.push((Rc::clone(&item), anim));
+                    self.active.push((id.clone(), anim));
                 }
             }
         }
     }
-    pub fn update(&mut self, tx: &Sender<UiCommand>) -> bool {
+    pub fn update(&mut self, tx: &Sender<UiCommand>, id_manager: &IDManager) -> bool {
         let now = Instant::now();
         let mut changed = false;
-        for (target, seq) in &mut self.active {
-            if let Some(target_ref) = target.borrow_mut().as_with_animation() {
-                let should_stop_loop = seq.is_loop && !target_ref.need_animate_loop();
-                let should_stop_all = !target_ref.need_animate();
+        for (id, seq) in &mut self.active {
+            if let Some(target) = id_manager.get_upgraded(id) {
+                if let Some(target_ref) = target.borrow().as_with_animation() {
+                    let should_stop_loop = seq.is_loop && !target_ref.need_animate_loop();
+                    let should_stop_all = !target_ref.need_animate();
 
-                if should_stop_loop || should_stop_all {
-                    seq.is_running = false;
+                    if should_stop_loop || should_stop_all {
+                        seq.is_running = false;
+                    }
                 }
             }
 
@@ -64,7 +66,7 @@ impl AnimationManager {
             if now >= seq.last_tick + step.delay {
                 // Выполняем действие шага
                 //tx.send(step.action.clone()).ok();
-                step.action.execute_command();
+                step.action.execute_command(id_manager);
                 changed = true;
                 seq.last_tick += step.delay;
                 seq.current_step += 1;

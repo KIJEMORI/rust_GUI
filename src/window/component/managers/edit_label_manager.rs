@@ -1,14 +1,12 @@
-use std::rc::Rc;
-
 use winit::{
     event::{KeyEvent, Modifiers},
     keyboard::{Key, ModifiersKeyState, NamedKey},
 };
 
-use crate::window::component::base::component_type::{SharedDrawable, WeakSharedDrawable};
+use crate::window::component::managers::id_manager::IDManager;
 
 pub struct EditLabelManager {
-    edit_label: Option<WeakSharedDrawable>,
+    edit_label: Option<u32>,
     modifiers: Modifiers,
 }
 
@@ -25,22 +23,21 @@ impl EditLabelManager {
     pub fn is_editing(&self) -> bool {
         return self.edit_label.is_some();
     }
-    pub fn set_edit_label(&mut self, label: SharedDrawable) {
-        let item = Rc::downgrade(&label);
-
-        if let Some(label) = item.upgrade() {
-            if let Some(with_animation) = label.borrow_mut().as_with_animation() {
+    pub fn set_edit_label(&mut self, id: &u32, id_manager: &IDManager) {
+        if let Some(label) = id_manager.get_upgraded(id) {
+            let mut label = label.borrow_mut();
+            if let Some(with_animation) = label.as_with_animation_mut() {
                 with_animation.start_animation()
             }
-            if let Some(label) = label.borrow_mut().as_edit_label_control_mut() {
+            if let Some(label) = label.as_edit_label_control_mut() {
                 label.set_cursor();
             }
         }
-        self.edit_label = Some(item);
+        self.edit_label = Some(id.clone());
     }
-    pub fn handle_key(&mut self, event: KeyEvent, needs_layout: &mut bool) {
-        if let Some(el) = self.edit_label.as_ref() {
-            if let Some(el) = el.upgrade() {
+    pub fn handle_key(&mut self, event: KeyEvent, needs_layout: &mut bool, id_manager: &IDManager) {
+        if let Some(id) = self.edit_label.as_ref() {
+            if let Some(el) = id_manager.get_upgraded(id) {
                 let mut e = el.borrow_mut();
 
                 let mut user_interacted = false;
@@ -65,7 +62,7 @@ impl EditLabelManager {
                                 user_interacted = true;
                             }
                             Key::Named(NamedKey::Escape) => {
-                                if let Some(with_animation) = e.as_with_animation() {
+                                if let Some(with_animation) = e.as_with_animation_mut() {
                                     with_animation.stop_loop_animation();
                                 }
                                 drop(e);
@@ -88,7 +85,7 @@ impl EditLabelManager {
                 if user_interacted {
                     *needs_layout = true;
 
-                    if let Some(with_animation) = e.as_with_animation() {
+                    if let Some(with_animation) = e.as_with_animation_mut() {
                         with_animation.start_animation();
                     }
 
@@ -96,13 +93,15 @@ impl EditLabelManager {
                         label.set_cursor();
                     }
                 }
+            } else {
+                self.edit_label = None;
             }
         }
     }
-    pub fn stop_edit(&mut self) {
-        if let Some(label) = &self.edit_label {
-            if let Some(label) = label.upgrade() {
-                if let Some(with_animation) = label.borrow_mut().as_with_animation() {
+    pub fn stop_edit(&mut self, id_manager: &IDManager) {
+        if let Some(id) = &self.edit_label {
+            if let Some(label) = id_manager.get_upgraded(id) {
+                if let Some(with_animation) = label.borrow_mut().as_with_animation_mut() {
                     with_animation.stop_loop_animation();
                 }
                 if let Some(label) = label.borrow_mut().as_edit_label_control_mut() {

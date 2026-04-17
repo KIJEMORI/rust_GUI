@@ -59,4 +59,7 @@ impl Layout for ColumnLayout {
     fn decrease(&self, area: &Rect<f32, u16>, parent_area: &Rect<f32, u16>) -> Rect<f32, u16> {
         self.base.decrease(area, parent_area)
     }
+    fn set_align(&mut self, align: super::base_layout::Align) {
+        self.base.set_align(align);
+    }
 }
