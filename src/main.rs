@@ -5,7 +5,7 @@ use std::rc::Rc;
 use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::button::Button;
 use crate::window::component::edit_label::EditLabel;
-use crate::window::component::interface::component_control::LabelControl;
+use crate::window::component::interface::component_control::{ComponentControlExt, LabelControl};
 use crate::window::component::interface::const_layout::ConstLayout;
 use crate::window::component::interface::drawable::Drawable;
 use crate::window::component::label::Label;
@@ -28,6 +28,7 @@ fn main() {
     panel.set_layout(layout);
 
     panel.as_dragable_mut().unwrap().set_dragable(true);
+    //.set_rails(window::component::managers::drag_manager::DragRails::Horizontal);
 
     let mut label1 = EditLabel::new("Новая игра");
 
@@ -42,7 +43,7 @@ fn main() {
         .as_panel_control_mut()
         .set_height(40)
         .set_width(400)
-        .set_background(0xFF0000FF);
+        .set_background(0xFFFF0000);
 
     let mut c = ConstBaseLayout::new();
     c.set_relative_width(50);
@@ -79,7 +80,7 @@ fn main() {
 
     panel.add(panel_2);
 
-    for _ in 0..10 {
+    for _ in 0..2000 {
         let mut label = Label::from_str("LOL");
         label.as_panel_control_mut().set_background(0xFF00FFFF);
         panel.add(label);
@@ -95,7 +96,7 @@ fn main() {
         let id = panel_setting.borrow().as_base().id;
         if let Some(hovearable) = panel_hov.borrow_mut().as_hoverable_mut() {
             hovearable
-                .set_on_mouse_enter(UiCommand::ChangeColor(Some(id), 0xFF000000))
+                .set_on_mouse_enter(UiCommand::ChangeColor(Some(id), 0xFFAA0AA0))
                 .set_on_mouse_leave(UiCommand::ChangeColor(Some(id), 0xFFFFFF00));
         }
     }

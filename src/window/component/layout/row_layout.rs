@@ -67,4 +67,10 @@ impl Layout for RowLayout {
     fn set_align(&mut self, align: super::base_layout::Align) {
         self.base.set_align(align);
     }
+    fn set_auto_scale(&mut self, tumbler: bool) {
+        self.base.set_auto_scale(tumbler);
+    }
+    fn is_auto_scale(&self) -> bool {
+        self.base.is_auto_scale()
+    }
 }

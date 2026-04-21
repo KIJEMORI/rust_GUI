@@ -2,12 +2,12 @@
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ShapeVertex {
     pub position: [f32; 2], // Координаты вершины (куда растеризуем)
-    pub color: [f32; 4],
+    pub color: u32,         //[f32; 4],
     // Параметры фигуры:
     pub p_a: [f32; 2], // Точка А (центр прямоугольника или старт линии) | UV - координата текста в текстуре
     pub p_b: [f32; 2], // Точка Б (размер прямоугольника или конец линии)
     pub params: [f32; 4], // [радиус/толщина, тип_фигуры, сглаживание, пусто]
-    pub border_color: [f32; 4],
+    pub border_color: u32, //[f32; 4],
 }
 
 // Типы фигур для params.y
@@ -19,11 +19,11 @@ impl ShapeVertex {
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         const ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
             0 => Float32x2, // position
-            1 => Float32x4, // color
+            1 => Unorm8x4, // color
             2 => Float32x2, // p_a
             3 => Float32x2, // p_b
             4 => Float32x4, // params
-            5 => Float32x4, // border_color
+            5 => Unorm8x4, // border_color
         ];
 
         wgpu::VertexBufferLayout {
@@ -35,17 +35,11 @@ impl ShapeVertex {
 }
 
 pub struct GPUShapeVertex {
-    // pub vertex_buffer: wgpu::Buffer,
-    // pub vertex_index_buffer: wgpu::Buffer,
     pub mask_pipeline: wgpu::RenderPipeline,
     pub content_pipeline: wgpu::RenderPipeline,
     pub unmask_pipeline: wgpu::RenderPipeline,
     pub bind_group: wgpu::BindGroup,
-    // Inderected Args Shape
-    //pub shape_indirect_buffer: wgpu::Buffer,
-    //pub shape_section_offsets: Vec<Range<usize>>, // Офсеты для каждой панели/линии
     pub active_shape_commands_count: u32,
-    //pub next_free_vertex: usize,
 }
 
 use std::ops::Range;

@@ -6,7 +6,6 @@ use crate::window::{
 };
 
 pub struct GpuRenderContext {
-    //pub vertices: Vec<Vertex>,
     pub texts: Vec<TextData>,
     pub shape_vertices: Vec<ShapeVertex>,
     pub shape_indices: Vec<u32>,
@@ -33,7 +32,7 @@ pub struct TextData {
     pub x: f32,
     pub y: f32,
     pub size: f32,
-    pub color: [f32; 4],
+    pub color: u32, //[f32; 4],
 }
 
 impl GpuRenderContext {
@@ -50,7 +49,7 @@ impl GpuRenderContext {
             x: final_x,
             y: final_y,
             size,
-            color: u32_to_rgba(color),
+            color: color_to_gpu(color), //u32_to_rgba(color),
         });
 
         self.command_sections.push(GpuCommand::Text(Section {
@@ -63,13 +62,13 @@ impl GpuRenderContext {
 
     pub fn push_shape(
         &mut self,
-        min_p: [f32; 2], // Левый верхний угол Bounding Box
-        max_p: [f32; 2], // Правый нижний угол Bounding Box
-        p_a: [f32; 2],   // Данные для SDF (Центр или Старт)
-        p_b: [f32; 2],   // Данные для SDF (Размер или Конец)
-        color: [f32; 4],
-        params: [f32; 4], // [радиус_толщина, тип, сглаживание, 0.0]
-        border_color: [f32; 4],
+        min_p: [f32; 2],   // Левый верхний угол Bounding Box
+        max_p: [f32; 2],   // Правый нижний угол Bounding Box
+        p_a: [f32; 2],     // Данные для SDF (Центр или Старт)
+        p_b: [f32; 2],     // Данные для SDF (Размер или Конец)
+        color: u32,        //[f32; 4],
+        params: [f32; 4],  // [радиус_толщина, тип, сглаживание, 0.0]
+        border_color: u32, //[f32; 4],
         level: u32,
         is_clip: bool,
         un_mask: bool,
@@ -87,11 +86,11 @@ impl GpuRenderContext {
 
         let v = corners.map(|pos| ShapeVertex {
             position: pos,
-            color,
+            color: color_to_gpu(color),
             p_a,
             p_b,
             params,
-            border_color,
+            border_color: color_to_gpu(border_color),
         });
 
         let start_vertex = self.shape_vertices.len();
@@ -133,24 +132,20 @@ impl GpuRenderContext {
         let x2 = rect.get_x2();
         let y2 = rect.get_y2();
 
-        let color_rgba = u32_to_rgba(color);
-
         // Параметры для SDF шейдера
         let width = x2 - x1;
         let height = y2 - y1;
         let center = [x1 + width * 0.5, y1 + height * 0.5];
         let size = [width, height];
 
-        let border_color = u32_to_rgba(border.color);
-
         self.push_shape(
             [x1, y1],
             [x2, y2],
             center,
             size,
-            color_rgba,
+            color, // color_rgba,
             [border.radius, SHAPE_RECT, 1.0, border.width],
-            border_color,
+            border.color,
             level,
             is_clip,
             un_mask,
@@ -168,8 +163,6 @@ impl GpuRenderContext {
         level: u32,
         is_clip: bool,
     ) {
-        let color_rgba = u32_to_rgba(color);
-
         let pad = thickness + 2.0;
 
         let x1 = start_p[0].min(end_p[0]) - pad;
@@ -177,17 +170,15 @@ impl GpuRenderContext {
         let x2 = start_p[0].max(end_p[0]) + pad;
         let y2 = start_p[1].max(end_p[1]) + pad;
 
-        let border_color = u32_to_rgba(border.color);
-
         // params: [половина толщины, тип: 1.0 (LINE), сглаживание: 1.0, 0.0]
         self.push_shape(
             [x1, y1], // min_p
             [x2, y2], // max_p
             start_p,  // p_a
             end_p,    // p_b
-            color_rgba,
+            color,    // color_rgba,
             [thickness * 0.5, SHAPE_LINE, 1.0, border.width],
-            border_color,
+            border.color,
             level,
             is_clip,
             false,
@@ -202,73 +193,14 @@ impl GpuRenderContext {
         self.shape_section_offsets.clear();
         self.command_sections.clear();
     }
-    // pub fn register_scroll(&mut self, offset: (f32, f32)) -> u32 {
-    //     if let Some(pos) = self.offsets.iter().position(|&o| o == offset) {
-    //         return pos as u32;
-    //     }
-    //     // Если нет — добавляем новый
-    //     let id = self.offsets.len() as u32;
-    //     self.offsets.push(offset);
-    //     id
-    // }
 }
 
-fn u32_to_rgba(color: u32) -> [f32; 4] {
-    let a = ((color >> 24) & 0xFF) as f32 / 255.0;
-    let r = ((color >> 16) & 0xFF) as f32 / 255.0;
-    let g = ((color >> 8) & 0xFF) as f32 / 255.0;
-    let b = (color & 0xFF) as f32 / 255.0;
-    [r, g, b, a]
+fn color_to_gpu(color: u32) -> u32 {
+    let a = (color >> 24) & 0xFF;
+    let r = (color >> 16) & 0xFF;
+    let g = (color >> 8) & 0xFF;
+    let b = color & 0xFF;
+
+    // Собираем в RGBA (порядок байтов для Unorm8x4 в wgpu)
+    (a << 24) | (b << 16) | (g << 8) | r
 }
-// pub fn push_rect(
-//     &mut self,
-//     rect: &Rect<i16>,
-//     parent_rect: Option<&Rect<i16>>,
-//     color: u32,
-//     offset: (f32, f32),
-// ) {
-//     let x1 = rect.x1 as f32 + offset.0;
-//     let y1 = rect.y1 as f32 + offset.1;
-//     let x2 = rect.x2 as f32 + offset.0;
-//     let y2 = rect.y2 as f32 + offset.1;
-
-//     let color = u32_to_rgba(color);
-//     let mut clip = [x1, y1, x2, y2];
-//     if let Some(parent) = parent_rect {
-//         let cx1 = (x1).max(parent.x1 as f32);
-//         let cy1 = (y1).max(parent.y1 as f32);
-//         let cx2 = (x2).min(parent.x2 as f32);
-//         let cy2 = (y2).min(parent.y2 as f32);
-
-//         clip = [cx1, cy1, cx2, cy2];
-//     }
-
-//     // Два треугольника (6 вершин)
-//     let v1 = Vertex {
-//         position: [x1, y1],
-//         color,
-//         clip,
-//     };
-//     let v2 = Vertex {
-//         position: [x2, y1],
-//         color,
-//         clip,
-//     };
-//     let v3 = Vertex {
-//         position: [x1, y2],
-//         color,
-//         clip,
-//     };
-//     let v4 = Vertex {
-//         position: [x2, y2],
-//         color,
-//         clip,
-//     };
-//     self.vertices.reserve(6);
-//     self.vertices.push(v1);
-//     self.vertices.push(v2);
-//     self.vertices.push(v3);
-//     self.vertices.push(v3);
-//     self.vertices.push(v2);
-//     self.vertices.push(v4);
-// }

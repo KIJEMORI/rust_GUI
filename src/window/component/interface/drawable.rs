@@ -4,12 +4,13 @@ use crate::window::component::animation::animation_action::AnimationSequence;
 use crate::window::component::base::area::Rect;
 use crate::window::component::base::base::Base;
 
+use crate::window::component::base::component_type::SharedDrawable;
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
 use crate::window::component::base::scroll::Scroll;
 use crate::window::component::base::settings::Settings;
 use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::managers::button_manager::ButtonManager;
-use crate::window::component::managers::drag_manager::DragManager;
+use crate::window::component::managers::drag_manager::{DragManager, DragRails};
 use crate::window::component::managers::hover_manager::HoverManager;
 use crate::window::component::managers::id_manager::IDManager;
 use crate::window::component::managers::scroll_manager::ScrollManager;
@@ -84,28 +85,41 @@ pub trait LayoutDrawable {
 
 pub trait DragableDrawable {
     fn is_dragable(&self) -> bool;
-    fn set_dragable(&mut self, tumbler: bool);
+    fn set_dragable(&mut self, tumbler: bool) -> &mut dyn DragableDrawable;
     fn start_drag(&mut self);
     fn drag(&mut self, mx_offset: f32, my_offset: f32);
     fn stop_drag(&mut self);
+    fn set_rails(&mut self, rails: DragRails) -> &mut dyn DragableDrawable;
+    fn set_on_drag(&mut self, command: UiCommand) -> &mut dyn DragableDrawable;
+    fn set_in_drag(&mut self, command: UiCommand) -> &mut dyn DragableDrawable;
+    fn set_on_drop(&mut self, command: UiCommand) -> &mut dyn DragableDrawable;
 }
 
 #[allow(dead_code)]
 pub trait Drawable: Any {
-    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<f32, u16>, level: u32);
+    fn print(
+        &mut self,
+        ctx: &mut GpuRenderContext,
+        area: &Rect<f32, u16>,
+        level: u32,
+        id_parent: u32,
+    );
+
     fn resize(
         &mut self,
         area: &Rect<f32, u16>,
         ctx: &LayoutContext,
-        scroll_item: bool,
+        auto_size: bool,
     ) -> Rect<f32, u16>;
+
+    fn resize_one(&mut self, ctx: &LayoutContext) {}
+
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 
     fn set_default_settings(&mut self, settings: &Settings) -> &mut dyn Drawable;
 
-    fn under(&self, mx: u16, my: u16) -> bool;
-    fn hover(&self, mx: u16, my: u16) -> bool;
+    fn hover(&self, mx: u16, my: u16, area: &Rect<f32, u16>) -> bool;
     #[allow(unused_variables)]
     fn get_managers<'a>(
         &'a self,
@@ -122,12 +136,16 @@ pub trait Drawable: Any {
     fn as_base(&self) -> &Base;
     fn as_base_mut(&mut self) -> &mut Base;
 
-    // Только mut
+    fn as_panel_control(&self) -> &dyn PanelControl;
     fn as_panel_control_mut(&mut self) -> &mut dyn PanelControl;
 
     // Layout control
     fn as_layout_control(&self) -> &dyn LayoutDrawable;
     fn as_layout_control_mut(&mut self) -> &mut dyn LayoutDrawable;
+
+    fn as_component_control_mut(&mut self) -> Option<&mut dyn ComponentControl> {
+        None
+    }
 
     // Label control
     fn as_label_control(&self) -> Option<&dyn LabelControl> {

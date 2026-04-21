@@ -29,9 +29,16 @@ impl HoverManager {
             if let Some(id) = &self.hovered_element {
                 if let Some(item) = id_manager.get_upgraded(id) {
                     let item = item.borrow();
-                    if item.hover(mx, my) {
-                        return;
-                    } else {
+                    let parent_id = item.as_base().id_parent;
+                    if let Some(parent) = id_manager.get_upgraded(&parent_id) {
+                        let rect = item.as_base().parent_rect.clone();
+                        let area = parent
+                            .borrow()
+                            .as_panel_control()
+                            .get_rect_without_offset(&rect);
+                        if item.hover(mx, my, &area) {
+                            return;
+                        }
                         if let Some(hoverable) = item.as_hoverable() {
                             hoverable.on_mouse_leave();
                         }
@@ -48,12 +55,20 @@ impl HoverManager {
             for id in self.items.iter().rev() {
                 if let Some(item) = id_manager.get_upgraded(id) {
                     let item = item.borrow();
-                    if item.hover(mx, my) {
-                        self.hovered_element = Some(id.clone());
-                        if let Some(hoverable) = item.as_hoverable() {
-                            hoverable.on_mouse_enter();
+                    let parent_id = item.as_base().id_parent;
+                    if let Some(parent) = id_manager.get_upgraded(&parent_id) {
+                        let rect = item.as_base().parent_rect.clone();
+                        let area = parent
+                            .borrow()
+                            .as_panel_control()
+                            .get_rect_without_offset(&rect);
+                        if item.hover(mx, my, &area) {
+                            self.hovered_element = Some(id.clone());
+                            if let Some(hoverable) = item.as_hoverable() {
+                                hoverable.on_mouse_enter();
+                            }
+                            break;
                         }
-                        break;
                     }
                 } else {
                     item_removed = true;

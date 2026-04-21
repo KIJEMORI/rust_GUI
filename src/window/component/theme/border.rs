@@ -7,7 +7,7 @@ pub struct Border {
 impl Default for Border {
     fn default() -> Self {
         Self {
-            color: 0xFF000000,
+            color: 0x00000000,
             width: 0.0,
             radius: 0.0,
         }

@@ -1,12 +1,15 @@
+use std::{cell::RefCell, rc::Rc};
+
 use crate::{
     add_drawable_control,
     window::component::{
         base::{
             area::Rect, base::Base, component_type::SharedDrawable,
-            gpu_render_context::GpuRenderContext, settings::Settings,
+            gpu_render_context::GpuRenderContext, scroll_slider::ScrollSlider, settings::Settings,
+            ui_command::UiCommand,
         },
         interface::{
-            component_control::{ComponentControl, FullEditControl, LabelControl, PanelControl},
+            component_control::{ComponentControl, ComponentControlExt, PanelControl},
             drawable::{
                 AnimationDrawable, ClickableDrawable, DragableDrawable, Drawable,
                 HoverableDrawable, InternalAccess, LayoutDrawable, ScrollableDrawable,
@@ -26,7 +29,9 @@ use crate::{
 pub struct ScrollPanel {
     pub panel: Panel,
     pub vertical_slider: bool,
+    vertical_slider_panel: SharedDrawable,
     pub horizontal_slider: bool,
+    horizontal_slider_panel: SharedDrawable,
     pub vertical_width: u8,
     pub horizontal_height: u8,
 }
@@ -37,10 +42,30 @@ impl Default for ScrollPanel {
 
         panel.as_scrollable_mut().unwrap().set_scrolable();
 
+        let mut vertical_slider_panel = ScrollSlider::default();
+        vertical_slider_panel
+            .as_dragable_mut()
+            .unwrap()
+            .set_dragable(true)
+            .set_rails(super::managers::drag_manager::DragRails::Vertical);
+
+        let vertical_slider_panel: SharedDrawable = Rc::new(RefCell::new(vertical_slider_panel));
+
+        let mut horizontal_slider_panel = ScrollSlider::default();
+        horizontal_slider_panel
+            .as_dragable_mut()
+            .unwrap()
+            .set_dragable(true)
+            .set_rails(super::managers::drag_manager::DragRails::Horizontal);
+
+        let horizontal_slider_panel: SharedDrawable =
+            Rc::new(RefCell::new(horizontal_slider_panel));
         Self {
             panel: panel,
             vertical_slider: true,
+            vertical_slider_panel: vertical_slider_panel,
             horizontal_slider: true,
+            horizontal_slider_panel: horizontal_slider_panel,
             vertical_width: 15,
             horizontal_height: 15,
         }
@@ -48,88 +73,137 @@ impl Default for ScrollPanel {
 }
 
 impl Drawable for ScrollPanel {
-    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<f32, u16>, level: u32) {
+    fn print(
+        &mut self,
+        ctx: &mut GpuRenderContext,
+        area: &Rect<f32, u16>,
+        level: u32,
+        id_parent: u32,
+    ) {
+        self.panel.base.id_parent = id_parent;
         if self.panel.base.visible && self.panel.base.visible_on_this_frame {
-            let rect = &self.panel.base.rect;
-            let background_color = self.panel.base.settings.background_color;
-            let border = &self.panel.border;
+            self.panel.base.set_parent_rect(area.clone());
+            let mut rect = self.panel.base.rect.clone();
 
-            ctx.push_rect_sdf(rect, background_color, border, level, true, false);
-            let current_content_level = level + 1;
-            let transient = ((background_color >> 24) & 0xff) as f32;
-            if transient > 0.0 {
-                ctx.push_rect_sdf(
-                    rect,
-                    background_color,
-                    border,
-                    current_content_level,
-                    false,
-                    false,
-                );
+            let mut x1 = rect.x1 + area.x1;
+            let mut y1 = rect.y1 + area.y1;
+
+            rect.set_position(x1, y1);
+
+            {
+                let background_color = self.panel.base.settings.background_color;
+                let border = &self.panel.border;
+
+                ctx.push_rect_sdf(&rect, background_color, border, level, true, false);
+                let current_content_level = level + 1;
+                let transient = ((background_color >> 24) & 0xff) as f32;
+                if transient > 0.0 {
+                    ctx.push_rect_sdf(
+                        &rect,
+                        background_color,
+                        border,
+                        current_content_level,
+                        false,
+                        false,
+                    );
+                }
             }
 
             let next_level = level + 1;
 
-            for child in self.panel.childs.iter() {
-                child.borrow().print(ctx, rect, next_level);
-            }
-
             if let Some(scroll) = &self.panel.scroll {
                 let offset = scroll.get_offset();
+                x1 += offset.0;
+                y1 += offset.1;
+            }
 
+            let mut rect_child = self.panel.base.rect.clone();
+            rect_child.set_position(x1, y1);
+
+            for child in self.panel.childs.iter() {
+                child
+                    .borrow_mut()
+                    .print(ctx, &rect_child, next_level, self.panel.base.id);
+            }
+
+            if let Some(scroll) = &mut self.panel.scroll {
+                let offset = scroll.get_offset();
                 if self.vertical_slider {
+                    let mut vertical_slider_panel = self.vertical_slider_panel.borrow_mut();
+
                     let track_height = if self.horizontal_slider {
                         rect.min.get_height() as f32 - self.horizontal_height as f32
                     } else {
                         rect.min.get_height() as f32
                     };
 
-                    let proportion = scroll.slider_height as f32 / scroll.height as f32;
+                    let mut slider_height = scroll.get_vertical_slider_height(track_height) as f32;
 
-                    let slider_height = (proportion * track_height) as u16;
+                    let min_h = scroll.min_slider_height as f32;
+                    if slider_height < min_h {
+                        slider_height = min_h;
+                    }
 
-                    let slider_x1 = rect.get_x2() - self.vertical_width as f32;
+                    let free_space = track_height - slider_height;
+                    let scroll_progress = scroll.get_vertical_progress();
 
-                    let max_y =
-                        rect.get_y2() - self.horizontal_height as f32 - slider_height as f32;
-                    let slider_y1 = (offset.1.abs() * proportion + rect.y1).min(max_y);
+                    let slider_x1 = rect.get_x2() - self.vertical_width as f32 - rect.x1;
+
+                    let slider_y1 = free_space * scroll_progress;
 
                     let vertical_scroll_rect = Rect::new(
                         slider_x1,
                         slider_y1,
                         self.vertical_width as u16,
-                        slider_height,
+                        slider_height as u16,
                     );
-                    let color = 0xFFFF0000;
-                    ctx.push_rect_sdf(&vertical_scroll_rect, color, border, level, false, false);
+
+                    vertical_slider_panel.as_base_mut().rect = vertical_scroll_rect;
+
+                    vertical_slider_panel.print(ctx, &rect, level + 1, self.panel.base.id);
                 }
                 if self.horizontal_slider {
+                    let mut horizontal_slider_panel = self.horizontal_slider_panel.borrow_mut();
+
                     let track_width = if self.vertical_slider {
                         rect.min.get_width() as f32 - self.vertical_width as f32
                     } else {
                         rect.min.get_width() as f32
                     };
 
-                    let proportion = scroll.slider_width as f32 / scroll.width as f32;
+                    let mut slider_width = scroll.get_horizontal_slider_width(track_width) as f32;
 
-                    let slider_width = (proportion * track_width) as u16;
+                    let min_w = scroll.min_slider_width as f32;
+                    if slider_width < min_w {
+                        slider_width = min_w;
+                    }
 
-                    let max_x = rect.get_x2() - self.vertical_width as f32 - slider_width as f32;
-                    let slider_x1 = (offset.0.abs() * proportion + rect.x1).min(max_x);
-                    let slider_y1 = rect.get_y2() - self.horizontal_height as f32;
+                    let free_space = track_width - slider_width;
+
+                    let scroll_progress = scroll.get_horizontal_progress();
+
+                    let slider_x1 = (free_space * scroll_progress);
+
+                    let slider_y1 = rect.get_y2() - self.horizontal_height as f32 - rect.y1;
 
                     let horizontal_scroll_rect = Rect::new(
                         slider_x1,
                         slider_y1,
-                        slider_width,
+                        slider_width as u16,
                         self.horizontal_height as u16,
                     );
-                    let color = 0xFF00FF00;
-                    ctx.push_rect_sdf(&horizontal_scroll_rect, color, border, level, false, false);
+
+                    horizontal_slider_panel.as_base_mut().rect = horizontal_scroll_rect;
+
+                    horizontal_slider_panel.print(ctx, &rect, level + 1, self.panel.base.id);
+                    //ctx.push_rect_sdf(&horizontal_scroll_rect, color, border, level, false, false);
                 }
             }
 
-            ctx.push_rect_sdf(rect, background_color, border, level, true, true);
+            let background_color = self.panel.base.settings.background_color;
+            let border = &self.panel.border;
+
+            ctx.push_rect_sdf(&rect, background_color, border, level, true, true);
         }
     }
 
@@ -137,9 +211,11 @@ impl Drawable for ScrollPanel {
         &mut self,
         area: &Rect<f32, u16>,
         ctx: &LayoutContext,
-        scroll_item: bool,
+        auto_size: bool,
     ) -> Rect<f32, u16> {
-        let rect = self.panel.resize(area, ctx, scroll_item);
+        let rect = self.panel.resize(area, ctx, auto_size);
+
+        let id = self.as_base().id;
 
         if let Some(scroll) = &mut self.panel.scroll {
             let mut height = scroll.height;
@@ -153,6 +229,111 @@ impl Drawable for ScrollPanel {
             }
 
             scroll.set_height_width(height, width);
+
+            if self.vertical_slider {
+                let mut vertical_slider_panel = self.vertical_slider_panel.borrow_mut();
+
+                vertical_slider_panel.as_base_mut().visible_on_this_frame = true;
+
+                let track_height = if self.horizontal_slider {
+                    rect.min.get_height() as f32 - self.horizontal_height as f32
+                } else {
+                    rect.min.get_height() as f32
+                };
+
+                let mut slider_height = scroll.get_vertical_slider_height(track_height) as f32;
+
+                let min_h = scroll.min_slider_height as f32;
+                if slider_height < min_h {
+                    slider_height = min_h;
+                }
+
+                let free_space = track_height - slider_height;
+
+                if let Some(dragable) = vertical_slider_panel.as_dragable_mut() {
+                    let content_to_track_ratio =
+                        (scroll.height - scroll.slider_height) as f32 / free_space;
+
+                    dragable.set_in_drag(UiCommand::ScrollPanel(
+                        Some(id),
+                        0.0,
+                        content_to_track_ratio, // Множитель для Y
+                    ));
+                }
+
+                let scroll_progress = scroll.get_vertical_progress();
+
+                let slider_x1 = rect.get_x2() - self.vertical_width as f32 - rect.x1;
+
+                let slider_y1 = free_space * scroll_progress;
+
+                let vertical_scroll_rect = Rect::new(
+                    slider_x1,
+                    slider_y1,
+                    self.vertical_width as u16,
+                    slider_height as u16,
+                );
+
+                vertical_slider_panel.as_base_mut().rect = vertical_scroll_rect;
+
+                let color = 0xFFFF0000;
+                vertical_slider_panel
+                    .as_base_mut()
+                    .settings
+                    .background_color = color;
+            }
+            if self.horizontal_slider {
+                let mut horizontal_slider_panel = self.horizontal_slider_panel.borrow_mut();
+                horizontal_slider_panel.as_base_mut().visible_on_this_frame = true;
+                let track_width = if self.vertical_slider {
+                    rect.min.get_width() as f32 - self.vertical_width as f32
+                } else {
+                    rect.min.get_width() as f32
+                };
+
+                let mut slider_width = scroll.get_horizontal_slider_width(track_width) as f32;
+
+                let min_w = scroll.min_slider_width as f32;
+                if slider_width < min_w {
+                    slider_width = min_w;
+                }
+
+                let free_space = track_width - slider_width;
+
+                if let Some(dragable) = horizontal_slider_panel.as_dragable_mut() {
+                    let content_to_track_ratio =
+                        (scroll.width - scroll.slider_width) as f32 / free_space;
+
+                    dragable.set_in_drag(UiCommand::ScrollPanel(
+                        Some(id),
+                        content_to_track_ratio,
+                        0.0,
+                    ));
+                }
+
+                let scroll_progress = scroll.get_horizontal_progress();
+
+                let slider_x1 = (free_space * scroll_progress);
+
+                let slider_y1 = rect.get_y2() - self.horizontal_height as f32 - rect.y1;
+
+                let horizontal_scroll_rect = Rect::new(
+                    slider_x1,
+                    slider_y1,
+                    slider_width as u16,
+                    self.horizontal_height as u16,
+                );
+
+                horizontal_slider_panel.as_base_mut().rect = horizontal_scroll_rect;
+
+                let color = 0xFFFF0000;
+                horizontal_slider_panel
+                    .as_base_mut()
+                    .settings
+                    .background_color = color;
+
+                //ctx.push_rect_sdf(&horizontal_scroll_rect, color, border, level, false, false);
+            }
         }
 
         return rect;
@@ -177,14 +358,46 @@ impl Drawable for ScrollPanel {
             id_manager,
             token,
         );
+
+        let id_vert = id_manager.register(Rc::clone(&self.vertical_slider_panel));
+        let id_hori = id_manager.register(Rc::clone(&self.horizontal_slider_panel));
+
+        if let Some(clickable) = self.vertical_slider_panel.borrow().as_clickable() {
+            if clickable.is_clickable() {
+                button_manager.add(id_vert);
+            }
+        }
+        if let Some(clickable) = self.horizontal_slider_panel.borrow().as_clickable() {
+            if clickable.is_clickable() {
+                button_manager.add(id_hori);
+            }
+        }
+
+        if let Some(hoverable) = self.vertical_slider_panel.borrow().as_hoverable() {
+            if hoverable.is_hoverable() {
+                hover_manager.add(id_vert);
+            }
+        }
+        if let Some(hoverable) = self.horizontal_slider_panel.borrow().as_hoverable() {
+            if hoverable.is_hoverable() {
+                hover_manager.add(id_hori);
+            }
+        }
+
+        if let Some(dragable) = self.vertical_slider_panel.borrow().as_dragable() {
+            if dragable.is_dragable() {
+                drag_manager.add(id_vert);
+            }
+        }
+        if let Some(dragable) = self.horizontal_slider_panel.borrow().as_dragable() {
+            if dragable.is_dragable() {
+                drag_manager.add(id_hori);
+            }
+        }
     }
 
-    fn under(&self, mx: u16, my: u16) -> bool {
-        self.panel.under(mx, my)
-    }
-
-    fn hover(&self, mx: u16, my: u16) -> bool {
-        self.panel.hover(mx, my)
+    fn hover(&self, mx: u16, my: u16, area: &Rect<f32, u16>) -> bool {
+        self.panel.hover(mx, my, area)
     }
 
     add_drawable_control!();
@@ -198,6 +411,12 @@ impl Drawable for ScrollPanel {
 
     fn set_default_settings(&mut self, settings: &Settings) -> &mut dyn Drawable {
         self.panel.set_default_settings(settings);
+        self.horizontal_slider_panel
+            .borrow_mut()
+            .set_default_settings(settings);
+        self.vertical_slider_panel
+            .borrow_mut()
+            .set_default_settings(settings);
         self
     }
 
@@ -208,15 +427,15 @@ impl Drawable for ScrollPanel {
         self.panel.as_base_mut()
     }
 
+    fn as_panel_control(&self) -> &dyn PanelControl {
+        self.panel.as_panel_control()
+    }
     fn as_panel_control_mut(&mut self) -> &mut dyn PanelControl {
         self.panel.as_panel_control_mut()
     }
 
-    fn as_label_control_mut(&mut self) -> Option<&mut dyn LabelControl> {
-        None
-    }
-    fn as_edit_label_control_mut(&mut self) -> Option<&mut dyn FullEditControl> {
-        None
+    fn as_component_control_mut(&mut self) -> Option<&mut dyn ComponentControl> {
+        Some(self)
     }
 
     fn as_clickable(&self) -> Option<&dyn ClickableDrawable> {
@@ -260,8 +479,8 @@ impl Drawable for ScrollPanel {
 }
 
 impl ComponentControl for ScrollPanel {
-    fn add<T: Drawable + 'static>(&mut self, item: T) -> SharedDrawable {
-        self.panel.add(item)
+    fn add_drawable(&mut self, item: SharedDrawable) -> SharedDrawable {
+        self.panel.add_drawable(item)
     }
 
     fn remove_by_index(&mut self, index: u32) -> Result<(), &'static str> {
@@ -274,5 +493,11 @@ impl ComponentControl for ScrollPanel {
 
     fn set_layout(&mut self, layout: Box<dyn Layout>) {
         self.panel.set_layout(layout);
+    }
+}
+
+impl ComponentControlExt for ScrollPanel {
+    fn add<T: Drawable + 'static>(&mut self, item: T) -> SharedDrawable {
+        self.panel.add(item)
     }
 }

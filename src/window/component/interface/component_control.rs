@@ -1,17 +1,21 @@
 use winit::keyboard::SmolStr;
 
 use crate::window::component::{
-    base::component_type::SharedDrawable,
+    base::{area::Rect, component_type::SharedDrawable},
     interface::{drawable::Drawable, layout::Layout},
     layout::layout_context::LayoutContext,
 };
 
 #[allow(dead_code)]
 pub trait ComponentControl {
-    fn add<T: Drawable + 'static>(&mut self, item: T) -> SharedDrawable;
+    fn add_drawable(&mut self, item: SharedDrawable) -> SharedDrawable;
     fn remove_by_index(&mut self, index: u32) -> Result<(), &'static str>;
     fn remove_item(&mut self, item: SharedDrawable);
     fn set_layout(&mut self, layout: Box<dyn Layout>);
+}
+
+pub trait ComponentControlExt {
+    fn add<T: Drawable + 'static>(&mut self, item: T) -> SharedDrawable;
 }
 
 #[allow(dead_code)]
@@ -20,6 +24,8 @@ pub trait PanelControl {
     fn set_position(&mut self, x: f32, y: f32) -> &mut dyn PanelControl;
     fn set_height(&mut self, h: u16) -> &mut dyn PanelControl;
     fn set_width(&mut self, w: u16) -> &mut dyn PanelControl;
+    fn get_rect(&self) -> &Rect<f32, u16>;
+    fn get_rect_without_offset(&self, rect: &Rect<f32, u16>) -> Rect<f32, u16>;
 }
 
 #[allow(dead_code)]

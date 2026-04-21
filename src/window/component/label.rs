@@ -74,53 +74,11 @@ impl Label {
         if let Some(line_metrics) = font.horizontal_line_metrics(scale) {
             let height = line_metrics.ascent - line_metrics.descent;
 
-            // Если хочешь еще плотнее (без учета "запаса" под ударения),
-            // можно использовать только ascent:
-            //let height = line_metrics.ascent;
-
             (width.ceil() as u16, height.ceil() as u16)
         } else {
-            // Fallback если шрифт сломан
             (width.ceil() as u16, scale.ceil() as u16)
         }
     }
-
-    // pub fn calculate_wrapped_size(&self, font: &FontArc, scale: f32, max_width: f32) -> (u16, u16) {
-    //     let layout = Layout::default();
-
-    //     let text = SectionText {
-    //         text: &self.text,
-    //         scale: scale.into(),
-    //         font_id: FontId(0),
-    //     };
-
-    //     let fonts = &[font];
-    //     let glyphs = layout.calculate_glyphs(
-    //         fonts,
-    //         &SectionGeometry {
-    //             screen_position: (0.0, 0.0),
-    //             bounds: (max_width, f32::INFINITY),
-    //         },
-    //         &[text],
-    //     );
-
-    //     let mut min_x = 0.0;
-    //     let mut max_x = 0.0;
-    //     let mut min_y = 0.0;
-    //     let mut max_y = 0.0;
-
-    //     for glyph in glyphs {
-    //         let pos = glyph.glyph.position;
-
-    //         max_x = (max_x as f32).max(pos.x as f32);
-    //         max_y = (max_y as f32).max(pos.y as f32);
-    //     }
-
-    //     let scaled_font = font.as_scaled(scale);
-    //     let line_height = scaled_font.ascent() - scaled_font.descent();
-
-    //     (max_x.ceil() as u16, (max_y + line_height).ceil() as u16)
-    // }
 
     fn set_max_size(&mut self, ctx: &LayoutContext) {
         let (w, h) = self.calculate_intrinsic_size(ctx.font, self.max_scale);
@@ -128,7 +86,7 @@ impl Label {
         self.panel.set_height(h);
     }
     fn get_index(&self, target_x: f32, font: &fontdue::Font, scale: f32) -> u32 {
-        let mut current_x = self.panel.base.rect.x1;
+        let mut current_x = self.panel.base.rect.x1 + self.as_base().parent_rect.x1;
 
         if let Some(scroll) = &self.panel.scroll {
             current_x += scroll.offset.0;
@@ -207,9 +165,11 @@ impl LabelControl for Label {
         if self.select_index_start != self.select_index_end
             && self.select_index_end != last_end_index
         {
-            if let Some(tx) = &self.panel.base.settings.command_tx {
-                let _ = tx.send(UiCommand::RequestRedraw());
-            }
+            // if let Some(tx) = &self.panel.base.settings.command_tx {
+            //     let _ = tx.send(UiCommand::RequestRedraw());
+            // }
+
+            self.resize_one(ctx);
             return true;
         }
         false
@@ -325,11 +285,23 @@ impl SelectableDrawable for Label {
 }
 
 impl Drawable for Label {
-    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<f32, u16>, level: u32) {
+    fn print(
+        &mut self,
+        ctx: &mut GpuRenderContext,
+        area: &Rect<f32, u16>,
+        level: u32,
+        id_parent: u32,
+    ) {
+        self.as_base_mut().id_parent = id_parent;
         if self.panel.base.visible_on_this_frame {
-            //self.panel.print(ctx, area, level);
+            self.as_base_mut().set_parent_rect(area.clone());
 
-            let rect = &self.panel.base.rect;
+            let mut rect = self.panel.base.rect.clone();
+
+            let mut x1 = rect.x1 + area.x1;
+            let mut y1 = rect.y1 + area.y1;
+
+            rect.set_position(x1, y1);
 
             let border = &self.panel.border;
 
@@ -349,16 +321,13 @@ impl Drawable for Label {
                 ctx.push_rect_sdf(&select_rect, self.select_color, border, level, false, false);
             }
 
-            let mut text_x1 = rect.x1;
-            let mut text_y1 = rect.y1;
-
             if let Some(scroll) = &self.panel.scroll {
                 let offset = scroll.get_offset();
-                text_x1 += offset.0;
-                text_y1 += offset.1;
+                x1 += offset.0;
+                y1 += offset.1;
             }
 
-            ctx.push_text(&self.text, text_x1, text_y1, self.scale, self.color, level);
+            ctx.push_text(&self.text, x1, y1, self.scale, self.color, level);
 
             if self.cursor_need {
                 let mut cursor_rect = self.cursor.clone();
@@ -377,28 +346,24 @@ impl Drawable for Label {
         }
     }
 
-    fn resize(
-        &mut self,
-        area: &Rect<f32, u16>,
-        ctx: &LayoutContext,
-        scroll_item: bool,
-    ) -> Rect<f32, u16> {
+    fn resize_one(&mut self, ctx: &LayoutContext) {
+        let area = &self.as_base().parent_rect.clone();
+
         if self.needs_layout {
             self.set_max_size(ctx);
 
             self.needs_layout = false
         }
 
-        self.panel.resize(area, ctx, scroll_item);
+        let mut rect = self.panel.base.rect.clone();
 
-        let rect = &mut self.panel.base.rect;
+        rect.set_position(rect.x1 + area.x1, rect.y1 + area.y1);
 
         let scale_factor = self.scale / ctx.sdf_base_size;
 
         let line_metrics = ctx.font.horizontal_line_metrics(ctx.sdf_base_size).unwrap();
         let text_height = (line_metrics.ascent - line_metrics.descent) * scale_factor;
 
-        //let mut last_id = None;
         let mut current_x = 0.0;
         let mut x_start = 0.0;
         let mut x_end = 0.0;
@@ -477,39 +442,115 @@ impl Drawable for Label {
             x_pos += scroll.offset.0
         }
 
-        //rect.set_position(x2 - x_pos, rect.y1);
+        self.cursor = Rect::new_from_coord((x_pos, rect.y1), (x_pos + 1.0, rect.get_y2()));
+    }
 
-        //let x_pos = (x_pos).min(x2 - 1.0);
+    fn resize(
+        &mut self,
+        area: &Rect<f32, u16>,
+        ctx: &LayoutContext,
+        auto_size: bool,
+    ) -> Rect<f32, u16> {
+        if self.needs_layout {
+            self.set_max_size(ctx);
+
+            self.needs_layout = false
+        }
+
+        self.panel.resize(area, ctx, auto_size);
+
+        let rect = &self.panel.base.rect;
+
+        let scale_factor = self.scale / ctx.sdf_base_size;
+
+        let line_metrics = ctx.font.horizontal_line_metrics(ctx.sdf_base_size).unwrap();
+        let text_height = (line_metrics.ascent - line_metrics.descent) * scale_factor;
+
+        let mut current_x = 0.0;
+        let mut x_start = 0.0;
+        let mut x_end = 0.0;
+        let mut x_cursor = 0.0;
+
+        for (i, c) in self.text.chars().enumerate() {
+            let idx = i as u32;
+            if idx == self.select_index_start {
+                x_start = current_x;
+            }
+            if idx == self.select_index_end {
+                x_end = current_x;
+            }
+            if idx == self.cursor_index {
+                x_cursor = current_x;
+            }
+
+            let metrics = ctx.font.metrics(c, ctx.sdf_base_size);
+
+            current_x += metrics.advance_width * scale_factor;
+        }
+        if let Some(scroll) = &mut self.panel.scroll {
+            scroll.set_height_width(text_height as u16, current_x as u16);
+            scroll.set_slider_height_width(rect.min.get_height(), rect.min.get_width());
+        }
+
+        let char_count = self.text.chars().count() as u32;
+        if self.select_index_start == char_count {
+            x_start = current_x;
+        }
+        if self.select_index_end == char_count {
+            x_end = current_x;
+        }
+        if self.cursor_index == char_count {
+            x_cursor = current_x;
+        }
+
+        if self.select_index_start != self.select_index_end {
+            let mut x1_offset = x_start;
+            let mut x2_offset = x_end;
+
+            if let Some(scroll) = &mut self.panel.scroll {
+                x1_offset += scroll.offset.0;
+                x2_offset += scroll.offset.0;
+            }
+
+            x2_offset = x2_offset.min(rect.get_x2());
+
+            let first_point = ((rect.x1 as f32 + x1_offset.min(x2_offset)), rect.y1);
+            let second_point = ((rect.x1 as f32 + x1_offset.max(x2_offset)), rect.get_y2());
+
+            self.select_rect = Rect::new_from_coord(first_point, second_point);
+        }
+
+        let x_offset = x_cursor;
+        let mut x_pos = rect.x1 as f32 + x_offset;
+
+        let x2 = rect.get_x2();
+
+        if let Some(scroll) = &mut self.panel.scroll
+            && self.change_cursor
+        {
+            if x_pos + scroll.offset.0 > x2 {
+                let scroll_x_offset = x2 - scroll.offset.0 - x_pos;
+
+                scroll.change_offset_x(scroll_x_offset);
+            } else if x_pos < rect.x1 - scroll.offset.0 {
+                let scroll_x_offset = rect.x1 - scroll.offset.0 - x_pos;
+
+                scroll.change_offset_x(scroll_x_offset);
+            }
+            self.change_cursor = false;
+        }
+
+        if let Some(scroll) = &mut self.panel.scroll {
+            x_pos += scroll.offset.0
+        }
 
         self.cursor = Rect::new_from_coord((x_pos, rect.y1), (x_pos + 1.0, rect.get_y2()));
 
         self.panel.base.rect.clone()
-
-        // let target_w = rect.min.get_width() as f32;
-        // let target_h = rect.min.get_height() as f32;
-
-        // if target_w > 0.0 && target_h > 0.0 {
-        //     // Считаем размер текста при маленьком базовом масштабе
-        //     let base_scale = 10.0;
-        //     let (w_base, h_base) = self.calculate_intrinsic_size(&font, base_scale);
-
-        //     if w_base > 0 && h_base > 0 {
-        //         let ratio_w = target_w / w_base as f32;
-        //         let ratio_h = target_h / h_base as f32;
-
-        //         // Выбираем меньший коэффициент (чтобы влезло и по ширине, и по высоте)
-        //         let optimal_scale = base_scale * ratio_w.min(ratio_h);
-
-        //         self.scale = optimal_scale.min(self.max_scale);
-        //     }
-        // }
-    }
-    fn under(&self, mx: u16, my: u16) -> bool {
-        self.panel.under(mx, my)
     }
 
-    fn hover(&self, mx: u16, my: u16) -> bool {
-        self.panel.hover(mx, my)
+    fn hover(&self, mx: u16, my: u16, area: &Rect<f32, u16>) -> bool {
+        self.panel.hover(mx, my, area)
     }
 
     add_drawable_control!();
@@ -533,6 +574,9 @@ impl Drawable for Label {
         self.panel.as_base_mut()
     }
 
+    fn as_panel_control(&self) -> &dyn PanelControl {
+        self.panel.as_panel_control()
+    }
     fn as_panel_control_mut(&mut self) -> &mut dyn PanelControl {
         self.panel.as_panel_control_mut()
     }

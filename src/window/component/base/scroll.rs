@@ -1,10 +1,11 @@
-#[derive(Default)]
 pub struct Scroll {
     pub offset: (f32, f32),
     pub height: u16,
     pub width: u16,
     pub slider_height: u16,
     pub slider_width: u16,
+    pub min_slider_height: u16,
+    pub min_slider_width: u16,
 }
 
 impl Scroll {
@@ -15,6 +16,8 @@ impl Scroll {
             width: 0,
             slider_height: 0,
             slider_width: 0,
+            min_slider_height: 25,
+            min_slider_width: 25,
         }
     }
     pub fn resize(&mut self) {
@@ -84,5 +87,33 @@ impl Scroll {
             .min(0.0);
 
         true
+    }
+
+    pub fn get_proportion_height(&self) -> f32 {
+        self.slider_height as f32 / self.height as f32
+    }
+    pub fn get_proportion_width(&self) -> f32 {
+        self.slider_width as f32 / self.width as f32
+    }
+    pub fn get_vertical_slider_height(&self, height: f32) -> u16 {
+        (height * self.get_proportion_height()) as u16
+    }
+    pub fn get_horizontal_slider_width(&self, width: f32) -> u16 {
+        (width * self.get_proportion_width()) as u16
+    }
+
+    pub fn get_vertical_progress(&self) -> f32 {
+        let max_scroll = (self.height - self.slider_height) as f32;
+        if max_scroll == 0.0 {
+            return 0.0;
+        }
+        (self.offset.1.abs() / max_scroll).min(1.0)
+    }
+    pub fn get_horizontal_progress(&self) -> f32 {
+        let max_scroll = (self.width - self.slider_width) as f32;
+        if max_scroll == 0.0 {
+            return 0.0;
+        }
+        (self.offset.0.abs() / max_scroll).min(1.0)
     }
 }

@@ -10,7 +10,9 @@ use crate::window::component::{
 };
 pub struct Base {
     pub id: u32,
+    pub id_parent: u32,
     pub rect: Rect<f32, u16>,
+    pub parent_rect: Rect<f32, u16>,
     pub visible: bool,
     pub settings: Settings,
     pub self_ref: Option<Weak<RefCell<dyn Drawable>>>,
@@ -24,7 +26,9 @@ impl Base {
     pub fn new(rect: Rect<f32, u16>) -> Base {
         Base {
             id: 0,
-            rect: rect,
+            id_parent: 0,
+            rect: rect.clone(),
+            parent_rect: rect,
             visible: true,
             settings: get_settings(),
             self_ref: None,
@@ -62,4 +66,8 @@ impl Base {
     // pub fn handle(&mut self) {
     //     self.last_interaction = Instant::now();
     // }
+    //
+    pub fn set_parent_rect(&mut self, rect: Rect<f32, u16>) {
+        self.parent_rect = rect
+    }
 }

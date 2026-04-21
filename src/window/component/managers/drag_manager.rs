@@ -1,5 +1,11 @@
 use crate::window::component::managers::id_manager::IDManager;
 
+pub enum DragRails {
+    Vertical,
+    Horizontal,
+    None,
+}
+
 pub struct DragManager {
     select: bool,
     drag: bool,
@@ -47,17 +53,25 @@ impl DragManager {
             self.drag_element = None;
             for id in self.items.iter().rev() {
                 if let Some(item) = id_manager.get_upgraded(id) {
-                    let is_hover_item = item.borrow().hover(mx, my);
-                    if is_hover_item {
-                        self.drag_element = Some(id.clone());
+                    let parent_id = item.borrow().as_base().id_parent;
+                    if let Some(parent) = id_manager.get_upgraded(&parent_id) {
+                        let rect = item.borrow().as_base().parent_rect.clone();
+                        let area = parent
+                            .borrow()
+                            .as_panel_control()
+                            .get_rect_without_offset(&rect);
+                        let is_hover_item = item.borrow().hover(mx, my, &area);
+                        if is_hover_item {
+                            self.drag_element = Some(id.clone());
 
-                        self.select = true;
-                        self.last_mouse_position = (mx, my);
-                        if let Some(dragable) = item.borrow_mut().as_dragable_mut() {
-                            dragable.start_drag();
+                            self.select = true;
+                            self.last_mouse_position = (mx, my);
+                            if let Some(dragable) = item.borrow_mut().as_dragable_mut() {
+                                dragable.start_drag();
+                            }
+
+                            break;
                         }
-
-                        break;
                     }
                 } else {
                     item_removed = true;

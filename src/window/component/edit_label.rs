@@ -83,16 +83,25 @@ impl Default for EditLabel {
 }
 
 impl Drawable for EditLabel {
-    fn print(&self, ctx: &mut GpuRenderContext, area: &Rect<f32, u16>, level: u32) {
-        self.label.print(ctx, area, level);
+    fn print(
+        &mut self,
+        ctx: &mut GpuRenderContext,
+        area: &Rect<f32, u16>,
+        level: u32,
+        id_parent: u32,
+    ) {
+        self.label.print(ctx, area, level, id_parent);
     }
     fn resize(
         &mut self,
         area: &Rect<f32, u16>,
         ctx: &LayoutContext,
-        scroll_item: bool,
+        auto_size: bool,
     ) -> Rect<f32, u16> {
-        self.label.resize(area, ctx, scroll_item)
+        self.label.resize(area, ctx, auto_size)
+    }
+    fn resize_one(&mut self, ctx: &LayoutContext) {
+        self.label.resize_one(ctx);
     }
 
     add_drawable_control!();
@@ -104,11 +113,12 @@ impl Drawable for EditLabel {
         self.label.set_default_settings(settings);
         self
     }
-    fn under(&self, mx: u16, my: u16) -> bool {
-        self.label.under(mx, my)
+
+    fn hover(&self, mx: u16, my: u16, area: &Rect<f32, u16>) -> bool {
+        self.label.hover(mx, my, area)
     }
-    fn hover(&self, mx: u16, my: u16) -> bool {
-        self.label.hover(mx, my)
+    fn as_panel_control(&self) -> &dyn PanelControl {
+        self.label.as_panel_control()
     }
     fn as_panel_control_mut(&mut self) -> &mut dyn PanelControl {
         self.label.as_panel_control_mut()

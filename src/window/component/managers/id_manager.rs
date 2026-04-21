@@ -13,7 +13,7 @@ impl Default for IDManager {
     fn default() -> Self {
         Self {
             id_map: FxHashMap::default(),
-            last_id: 1,
+            last_id: 0,
         }
     }
 }

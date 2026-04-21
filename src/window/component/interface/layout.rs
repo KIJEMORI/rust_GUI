@@ -21,4 +21,6 @@ pub trait Layout {
     fn get_margin(&self) -> &Direction;
     fn set_const_layout(&mut self, const_layout: Option<Box<dyn ConstLayout>>);
     fn set_align(&mut self, align: Align);
+    fn set_auto_scale(&mut self, tumbler: bool);
+    fn is_auto_scale(&self) -> bool;
 }

@@ -17,6 +17,7 @@ use crate::window::component::managers::scroll_manager::ScrollManager;
 use crate::window::component::managers::select_manager::SelectManager;
 use crate::window::component::panel::Panel;
 use crate::window::wgpu::wgpu_state::WgpuState;
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
@@ -30,7 +31,7 @@ use winit::window::{Window, WindowId};
 pub struct AppWinit {
     window: Option<Arc<Window>>,
     state: Option<WgpuState>,
-    pub panel: Panel,
+    pub panel: SharedDrawable,
     cursor_position: (u16, u16),
     button_manager: ButtonManager,
     hover_manager: HoverManager,
@@ -57,6 +58,12 @@ impl Default for AppWinit {
         settings.command_tx = Some(tx.clone());
         panel.base.settings = settings;
 
+        let panel: SharedDrawable = Rc::new(RefCell::new(panel));
+
+        let mut id_manager = IDManager::default();
+
+        id_manager.register(Rc::clone(&panel));
+
         Self {
             window: Option::default(),
             state: Option::default(),
@@ -69,7 +76,7 @@ impl Default for AppWinit {
             animation_manager: AnimationManager::default(),
             scroll_manager: ScrollManager::default(),
             drag_manager: DragManager::default(),
-            id_manager: IDManager::default(),
+            id_manager: id_manager,
             commands_tx: tx,
             commands_rx: rx,
             next_redraw: None,
@@ -90,27 +97,46 @@ impl Default for AppWinit {
 impl AppWinit {
     fn update_layout(&mut self) {
         if let (Some(window), Some(state)) = (&self.window, &mut self.state) {
+            let now = Instant::now();
+
             let window_size = window.inner_size();
 
+            let width = window_size.width as u16;
+            let height = window_size.height as u16;
+
             state.text_vertex.section_hashes.fill(0);
+
+            self.panel
+                .borrow_mut()
+                .as_panel_control_mut()
+                .set_width(width)
+                .set_height(height);
 
             let layout_context = LayoutContext {
                 font: &state.text_vertex.atlas.font,
                 sdf_base_size: 64.0,
             };
 
-            let scrolable = self.panel.as_scrollable().unwrap().is_scrollable();
-
-            self.panel.resize(
-                &Rect::new(
-                    0.0,
-                    0.0,
-                    window_size.width as u16,
-                    window_size.height as u16,
-                ),
+            self.panel.borrow_mut().resize(
+                &Rect::new(0.0, 0.0, width, height),
                 &layout_context,
-                scrolable,
+                false,
             );
+
+            let screen_uniform = [
+                window_size.width as f32,
+                window_size.height as f32,
+                0.0,
+                0.0,
+            ]; // +padding
+            state.queue.write_buffer(
+                &state.uniform_buffer,
+                0,
+                bytemuck::cast_slice(&screen_uniform),
+            );
+
+            let duration = now.elapsed(); // Получаем длительность
+            println!("Время Пересчёта: {:?}", duration);
         }
     }
     fn print(&mut self) {
@@ -125,8 +151,9 @@ impl AppWinit {
 
         self.gpu_ctx.clear();
 
-        self.panel
-            .print(&mut self.gpu_ctx, &self.panel.base.rect, 1);
+        let rect = &self.panel.borrow().as_base().rect.clone();
+
+        self.panel.borrow_mut().print(&mut self.gpu_ctx, rect, 1, 0);
 
         state.prepare_gpu_data(&mut self.gpu_ctx);
 
@@ -175,6 +202,8 @@ impl AppWinit {
 
             state.render(&self.gpu_ctx, &mut render_pass);
         }
+        let duration = now.elapsed(); // Получаем длительность
+        println!("Время кадра: {:?}", duration);
 
         // Отправляем записанные команды на выполнение в видеокарту
         state.queue.submit(std::iter::once(encoder.finish()));
@@ -224,17 +253,25 @@ impl AppWinit {
             UiCommand::SetScale(_, _)
             | UiCommand::SetText(_, _)
             | UiCommand::RequestRedraw()
-            | UiCommand::Custom(_, _) => {
+            | UiCommand::Custom(_, _)
+            | UiCommand::ScrollPanel(_, _, _) => {
                 *needs_layout = true;
-                *resize = true
             }
 
             UiCommand::EditLabel(el) => {
                 if let Some(el) = el {
-                    self.edit_label_manager
-                        .set_edit_label(&el, &self.id_manager);
-                    *needs_layout = true;
-                    *resize = true
+                    if let Some(state) = &self.state {
+                        let layout_context = LayoutContext {
+                            font: &state.text_vertex.atlas.font,
+                            sdf_base_size: 64.0,
+                        };
+                        self.edit_label_manager.set_edit_label(
+                            &el,
+                            &self.id_manager,
+                            &layout_context,
+                        );
+                        *needs_layout = true;
+                    }
                 }
             }
             UiCommand::RequestRedrawWithTimer(time) => {
@@ -275,13 +312,23 @@ impl AppWinit {
     fn handle_key(&mut self, event: KeyEvent) {
         let mut needs_layout = false;
 
-        self.edit_label_manager
-            .handle_key(event, &mut needs_layout, &self.id_manager);
+        if let Some(state) = self.state.as_ref() {
+            let layout_context = LayoutContext {
+                font: &state.text_vertex.atlas.font,
+                sdf_base_size: 64.0,
+            };
 
-        if needs_layout {
-            self.update_layout();
-            if let Some(w) = &self.window {
-                w.request_redraw();
+            self.edit_label_manager.handle_key(
+                event,
+                &mut needs_layout,
+                &self.id_manager,
+                &layout_context,
+            );
+
+            if needs_layout {
+                if let Some(w) = &self.window {
+                    w.request_redraw();
+                }
             }
         }
     }
@@ -343,6 +390,8 @@ impl ApplicationHandler for AppWinit {
             wgpu::PresentMode::Fifo // Дефолтный вариант
         };
 
+        //let present_mode = wgpu::PresentMode::Fifo;
+
         config.present_mode = present_mode;
 
         surface.configure(&device, &config);
@@ -358,42 +407,9 @@ impl ApplicationHandler for AppWinit {
             }
             WindowEvent::Resized(size) => {
                 if let Some(state) = self.state.as_mut() {
-                    // Обновляем конфиг wgpu (чтобы не было растягивания картинки и утечек)
-                    // state.config.width = size.width.max(1);
-                    // state.config.height = size.height.max(1);
-                    // state.surface.configure(&state.device, &state.config);
-
                     state.resize(size);
 
-                    // Обновляем размеры корневой панели
-                    let width = size.width as u16;
-                    let height = size.height as u16;
-
-                    state.text_vertex.section_hashes.fill(0);
-
-                    self.panel
-                        .as_panel_control_mut()
-                        .set_width(width)
-                        .set_height(height);
-
-                    let layout_context = LayoutContext {
-                        font: &state.text_vertex.atlas.font,
-                        sdf_base_size: 64.0,
-                    };
-
-                    self.panel
-                        .resize(&Rect::new(0.0, 0.0, width, height), &layout_context, false);
-
-                    let screen_uniform = [size.width as f32, size.height as f32, 0.0, 0.0]; // +padding
-                    state.queue.write_buffer(
-                        &state.uniform_buffer,
-                        0,
-                        bytemuck::cast_slice(&screen_uniform),
-                    );
-
-                    // if let Some(window) = self.window.as_ref() {
-                    //     window.request_redraw();
-                    // }
+                    self.update_layout();
                     self.print();
                 }
             }
@@ -416,22 +432,22 @@ impl ApplicationHandler for AppWinit {
                         font: &state.text_vertex.atlas.font,
                         sdf_base_size: 64.0,
                     };
-                    if self.select_manager.select(
+                    self.select_manager.select(
                         self.cursor_position.0,
                         self.cursor_position.1,
                         &layout_context,
                         &self.id_manager,
-                    ) {
-                        need_redraw = true;
-                    }
+                    );
+                    need_redraw = self.select_manager.in_run();
                 }
 
-                let (mx, my) = self.cursor_position;
+                if !need_redraw {
+                    let (mx, my) = self.cursor_position;
 
-                need_redraw = need_redraw || self.drag_manager.drag(mx, my, &self.id_manager);
+                    need_redraw = self.drag_manager.drag(mx, my, &self.id_manager);
+                }
 
                 if need_redraw {
-                    self.update_layout();
                     if let Some(w) = &self.window {
                         w.request_redraw();
                     }
@@ -496,7 +512,6 @@ impl ApplicationHandler for AppWinit {
                         if let Some(state) = self.state.as_mut() {
                             state.text_vertex.section_hashes.fill(0);
                         }
-                        self.update_layout();
                         if let Some(w) = &self.window {
                             w.request_redraw();
                         }
@@ -557,8 +572,13 @@ impl ApplicationHandler for AppWinit {
 }
 
 impl ComponentControl for AppWinit {
-    fn add<T: Drawable + 'static>(&mut self, item: T) -> SharedDrawable {
-        let shared = self.panel.add(item);
+    fn add_drawable(&mut self, item: SharedDrawable) -> SharedDrawable {
+        let shared = self
+            .panel
+            .borrow_mut()
+            .as_component_control_mut()
+            .unwrap()
+            .add_drawable(item);
 
         let weak_self = Rc::downgrade(&shared);
 
@@ -566,9 +586,9 @@ impl ComponentControl for AppWinit {
 
         shared
             .borrow_mut()
-            .set_default_settings(&self.panel.base.settings);
+            .set_default_settings(&self.panel.borrow().as_base().settings);
 
-        self.panel.get_managers(
+        self.panel.borrow().get_managers(
             &mut self.button_manager,
             &mut self.hover_manager,
             &mut self.select_manager,
@@ -582,14 +602,26 @@ impl ComponentControl for AppWinit {
     }
 
     fn remove_by_index(&mut self, index: u32) -> Result<(), &'static str> {
-        self.panel.remove_by_index(index)
+        self.panel
+            .borrow_mut()
+            .as_component_control_mut()
+            .unwrap()
+            .remove_by_index(index)
     }
 
     fn remove_item(&mut self, item: SharedDrawable) {
-        self.panel.remove_item(item)
+        self.panel
+            .borrow_mut()
+            .as_component_control_mut()
+            .unwrap()
+            .remove_item(item)
     }
 
     fn set_layout(&mut self, layout: Box<dyn Layout>) {
-        self.panel.set_layout(layout);
+        self.panel
+            .borrow_mut()
+            .as_component_control_mut()
+            .unwrap()
+            .set_layout(layout);
     }
 }

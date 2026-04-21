@@ -1,8 +1,12 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::mpsc::Sender;
 
 use crate::window::component::base::component_type::SharedDrawable;
 use crate::window::component::base::ui_command::UiCommand;
-use crate::window::component::interface::component_control::ComponentControl;
+use crate::window::component::interface::component_control::{
+    ComponentControl, ComponentControlExt,
+};
 use crate::window::component::interface::drawable::Drawable;
 use crate::window::component::interface::layout::Layout;
 use crate::window::component::panel::Panel;
@@ -27,17 +31,16 @@ impl App {
         }
     }
 
-    pub fn as_panel(&mut self) -> &mut Panel {
-        if self.app.is_some() {
-            return &mut self.app.as_mut().unwrap().panel;
-        } else {
+    pub fn as_drawable(&mut self) -> &SharedDrawable {
+        if self.app.is_none() {
             self.app = Some(AppWinit::default());
-            return &mut self.app.as_mut().unwrap().panel;
         }
+
+        return &self.app.as_ref().unwrap().panel;
     }
 
     pub fn run(&mut self) {
-        if !self.app.is_some() {
+        if self.app.is_none() {
             self.app = Some(AppWinit::default());
         }
 
@@ -47,23 +50,19 @@ impl App {
     }
 
     pub fn get_tx(&mut self) -> Sender<UiCommand> {
-        if self.app.is_some() {
-            self.app.as_ref().unwrap().get_tx()
-        } else {
+        if !self.app.is_none() {
             self.app = Some(AppWinit::default());
-            self.app.as_ref().unwrap().get_tx()
         }
+        self.app.as_ref().unwrap().get_tx()
     }
 }
 
 impl ComponentControl for App {
-    fn add<T: Drawable + 'static>(&mut self, item: T) -> SharedDrawable {
-        if self.app.is_some() {
-            self.app.as_mut().unwrap().add(item)
-        } else {
+    fn add_drawable(&mut self, item: SharedDrawable) -> SharedDrawable {
+        if self.app.is_none() {
             self.app = Some(AppWinit::default());
-            self.app.as_mut().unwrap().add(item)
         }
+        self.app.as_mut().unwrap().add_drawable(item)
     }
 
     fn remove_by_index(&mut self, index: u32) -> Result<(), &'static str> {
@@ -83,11 +82,20 @@ impl ComponentControl for App {
     }
 
     fn set_layout(&mut self, layout: Box<dyn Layout>) {
-        if self.app.is_some() {
-            self.app.as_mut().unwrap().set_layout(layout);
-        } else {
+        if self.app.is_none() {
             self.app = Some(AppWinit::default());
-            self.app.as_mut().unwrap().set_layout(layout);
         }
+        self.app.as_mut().unwrap().set_layout(layout);
+    }
+}
+
+impl ComponentControlExt for App {
+    fn add<T: Drawable + 'static>(&mut self, item: T) -> SharedDrawable {
+        if self.app.is_none() {
+            self.app = Some(AppWinit::default());
+        }
+
+        let drawable = Rc::new(RefCell::new(item));
+        self.app.as_mut().unwrap().add_drawable(drawable)
     }
 }

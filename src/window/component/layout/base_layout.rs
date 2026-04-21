@@ -13,6 +13,7 @@ pub struct BaseLayout {
     padding: Direction,
     const_layout: Option<Box<dyn ConstLayout>>,
     pub align: Align,
+    pub auto_scale: bool,
 }
 
 impl BaseLayout {
@@ -28,6 +29,7 @@ impl Default for BaseLayout {
             padding: Direction::default(),
             const_layout: None,
             align: Align::Base,
+            auto_scale: true,
         }
     }
 }
@@ -104,10 +106,10 @@ impl Layout for BaseLayout {
         return area;
     }
     fn padding_area(&self, area: &Rect<f32, u16>) -> Rect<f32, u16> {
-        let x1 = area.x1 + self.padding.left as f32;
-        let y1 = area.y1 + self.padding.up as f32;
-        let x2 = area.get_x2() - self.padding.right as f32;
-        let y2 = area.get_y2() - self.padding.down as f32;
+        let x1 = self.padding.left as f32;
+        let y1 = self.padding.up as f32;
+        let x2 = area.min.get_width() as f32 - self.padding.right as f32;
+        let y2 = area.min.get_height() as f32 - self.padding.down as f32;
 
         Rect::new_from_coord((x1, y1), (x2, y2))
     }
@@ -129,5 +131,11 @@ impl Layout for BaseLayout {
     }
     fn set_align(&mut self, align: Align) {
         self.align = align;
+    }
+    fn set_auto_scale(&mut self, tumbler: bool) {
+        self.auto_scale = tumbler
+    }
+    fn is_auto_scale(&self) -> bool {
+        self.auto_scale
     }
 }

@@ -3,7 +3,9 @@ use winit::{
     keyboard::{Key, ModifiersKeyState, NamedKey},
 };
 
-use crate::window::component::managers::id_manager::IDManager;
+use crate::window::component::{
+    layout::layout_context::LayoutContext, managers::id_manager::IDManager,
+};
 
 pub struct EditLabelManager {
     edit_label: Option<u32>,
@@ -23,7 +25,7 @@ impl EditLabelManager {
     pub fn is_editing(&self) -> bool {
         return self.edit_label.is_some();
     }
-    pub fn set_edit_label(&mut self, id: &u32, id_manager: &IDManager) {
+    pub fn set_edit_label(&mut self, id: &u32, id_manager: &IDManager, ctx: &LayoutContext) {
         if let Some(label) = id_manager.get_upgraded(id) {
             let mut label = label.borrow_mut();
             if let Some(with_animation) = label.as_with_animation_mut() {
@@ -32,10 +34,18 @@ impl EditLabelManager {
             if let Some(label) = label.as_edit_label_control_mut() {
                 label.set_cursor();
             }
+
+            label.resize_one(ctx);
         }
         self.edit_label = Some(id.clone());
     }
-    pub fn handle_key(&mut self, event: KeyEvent, needs_layout: &mut bool, id_manager: &IDManager) {
+    pub fn handle_key(
+        &mut self,
+        event: KeyEvent,
+        needs_layout: &mut bool,
+        id_manager: &IDManager,
+        ctx: &LayoutContext,
+    ) {
         if let Some(id) = self.edit_label.as_ref() {
             if let Some(el) = id_manager.get_upgraded(id) {
                 let mut e = el.borrow_mut();
@@ -83,6 +93,8 @@ impl EditLabelManager {
                 }
 
                 if user_interacted {
+                    e.resize_one(ctx);
+
                     *needs_layout = true;
 
                     if let Some(with_animation) = e.as_with_animation_mut() {

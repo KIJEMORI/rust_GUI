@@ -44,16 +44,24 @@ impl SelectManager {
             self.selected_element = None;
             for id in self.items.iter().rev() {
                 if let Some(item) = id_manager.get_upgraded(id) {
-                    let is_hover_item = item.borrow().hover(mx, my);
-                    if is_hover_item {
-                        self.selected_element = Some(id.clone());
+                    let parent_id = item.borrow().as_base().id_parent;
+                    if let Some(parent) = id_manager.get_upgraded(&parent_id) {
+                        let rect = item.borrow().as_base().parent_rect.clone();
+                        let area = parent
+                            .borrow()
+                            .as_panel_control()
+                            .get_rect_without_offset(&rect);
+                        let is_hover_item = item.borrow().hover(mx, my, &area);
+                        if is_hover_item {
+                            self.selected_element = Some(id.clone());
 
-                        if let Some(label) = item.borrow_mut().as_label_control_mut() {
-                            label.set_start_caret((mx, my), ctx);
-                            self.select = true;
+                            if let Some(label) = item.borrow_mut().as_label_control_mut() {
+                                label.set_start_caret((mx, my), ctx);
+                                self.select = true;
+                            }
+
+                            break;
                         }
-
-                        break;
                     }
                 } else {
                     item_removed = true;
@@ -75,10 +83,20 @@ impl SelectManager {
         if self.select {
             if let Some(id) = &self.selected_element {
                 if let Some(item) = id_manager.get_upgraded(id) {
-                    let is_still_over = item.borrow().hover(mx, my);
-                    if is_still_over {
-                        if let Some(label) = item.borrow_mut().as_label_control_mut() {
-                            return label.set_end_caret((mx, my), ctx);
+                    let parent_id = item.borrow().as_base().id_parent;
+                    if let Some(parent) = id_manager.get_upgraded(&parent_id) {
+                        let rect = item.borrow().as_base().parent_rect.clone();
+                        let area = parent
+                            .borrow()
+                            .as_panel_control()
+                            .get_rect_without_offset(&rect);
+
+                        let is_still_over = item.borrow().hover(mx, my, &area);
+                        if is_still_over {
+                            if let Some(label) = item.borrow_mut().as_label_control_mut() {
+                                label.set_end_caret((mx, my), ctx);
+                            }
+                            return true;
                         }
                     }
                 } else {
@@ -90,5 +108,8 @@ impl SelectManager {
     }
     pub fn stop_select(&mut self) {
         self.select = false;
+    }
+    pub fn in_run(&self) -> bool {
+        self.select
     }
 }

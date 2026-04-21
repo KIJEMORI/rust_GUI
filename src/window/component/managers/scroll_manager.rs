@@ -21,10 +21,18 @@ impl ScrollManager {
         for id in self.items.iter().rev() {
             if let Some(rc_item) = id_manager.get_upgraded(id) {
                 let mut item = rc_item.borrow_mut();
-                if item.hover(mx, my) {
-                    if let Some(scrollable) = item.as_scrollable_mut() {
-                        if scrollable.scroll(x, y) {
-                            return true;
+                let parent_id = item.as_base().id_parent;
+                if let Some(parent) = id_manager.get_upgraded(&parent_id) {
+                    let rect = item.as_base().parent_rect.clone();
+                    let area = parent
+                        .borrow()
+                        .as_panel_control()
+                        .get_rect_without_offset(&rect);
+                    if item.hover(mx, my, &area) {
+                        if let Some(scrollable) = item.as_scrollable_mut() {
+                            if scrollable.scroll(x, y) {
+                                return true;
+                            }
                         }
                     }
                 }

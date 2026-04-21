@@ -1,67 +1,10 @@
-use std::{
-    hash::{Hash, Hasher},
-    time::Instant,
-};
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable, Default)]
-pub struct TextVertex {
-    pub position: [f32; 2],
-    pub uv: [f32; 2],
-    pub color: [f32; 4],
-    pub section_id: u32,
-}
-
-impl TextVertex {
-    pub fn desc() -> wgpu::VertexBufferLayout<'static> {
-        const ATTRIBUTES: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![
-            0 => Float32x2, // position
-            1 => Float32x2, // uv
-            2 => Float32x4, // color
-            //4 => Uint32,    // section_id
-
-        ];
-
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<TextVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &ATTRIBUTES,
-        }
-    }
-}
-
-impl PartialEq for TextVertex {
-    fn eq(&self, other: &Self) -> bool {
-        self.position == other.position
-            && self.uv == other.uv
-            && self.color == other.color
-            && self.section_id == other.section_id
-    }
-}
-
-impl Eq for TextVertex {}
-
-impl Hash for TextVertex {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        let fields = [
-            &self.position[..],
-            &self.uv[..],
-            &self.color[..],
-            &[self.section_id as f32],
-        ];
-        for field in fields {
-            for &val in field {
-                val.to_bits().hash(state);
-            }
-        }
-    }
-}
+use std::time::Instant;
 
 fn push_glyph_vertices(
     vertices: &mut Vec<ShapeVertex>,
     pos: [f32; 4], // x1, y1, x2, y2
     uv: [f32; 4],  // u1, v1, u2, v2
-    color: [f32; 4],
+    color: u32,    //[f32; 4],
 ) {
     let [x1, y1, x2, y2] = pos;
     let [u1, v1, u2, v2] = uv;
@@ -77,7 +20,7 @@ fn push_glyph_vertices(
             p_b: [0.0, 0.0],
             color,
             params: [0.0, SHAPE_TEXT, 0.0, 0.0],
-            border_color: [0.0, 0.0, 0.0, 0.0],
+            border_color: 0,
         });
     }
 }

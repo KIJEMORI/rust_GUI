@@ -1,4 +1,4 @@
-use std::{rc::Rc, time::Duration};
+use std::{option, rc::Rc, time::Duration};
 
 use crate::window::component::{
     animation::animation_action::AnimationSequence,
@@ -13,6 +13,7 @@ pub enum UiCommand<T = ()> {
     Custom(Option<u32>, Rc<dyn Fn(SharedDrawable)>),
     SetScale(Option<u32>, u16),
     EditLabel(Option<u32>),
+    ScrollPanel(Option<u32>, f32, f32),
     RequestRedraw(),
     RequestRedrawWithoutResize(),
     RequestRedrawWithTimer(Duration),
@@ -30,6 +31,15 @@ pub enum UiCommand<T = ()> {
 }
 
 impl UiCommand {
+    pub fn fill_coord(&mut self, mx: f32, my: f32) {
+        match self {
+            UiCommand::ScrollPanel(_, x, y) => {
+                *x = -mx * x.clone();
+                *y = -my * y.clone();
+            }
+            _ => (),
+        }
+    }
     pub fn fill_ref(&mut self, item: &u32) {
         match self {
             UiCommand::Batch(cmds) => {
@@ -47,7 +57,8 @@ impl UiCommand {
             | UiCommand::SetAnimation(target, _)
             | UiCommand::StartAnimation(target)
             | UiCommand::Custom(target, _)
-            | UiCommand::DragItem(target) => {
+            | UiCommand::DragItem(target)
+            | UiCommand::ScrollPanel(target, _, _) => {
                 if target.is_none() {
                     *target = Some(item.clone());
                 }
@@ -137,6 +148,16 @@ impl UiCommand {
             UiCommand::Custom(id, action) => {
                 if let Some(el) = get_upgrade_by_id(id, id_manager) {
                     (action)(el.clone());
+                }
+            }
+            UiCommand::ScrollPanel(id, mx, my) => {
+                if let Some(el) = get_upgrade_by_id(id, id_manager) {
+                    if let Some(scrollable) = el.borrow_mut().as_scrollable_mut() {
+                        let mx = mx.clone();
+                        let my = my.clone();
+
+                        scrollable.scroll(mx, my);
+                    }
                 }
             }
             _ => (),
