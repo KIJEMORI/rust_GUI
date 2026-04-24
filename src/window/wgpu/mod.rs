@@ -1,3 +1,5 @@
+#[cfg(feature = "3d_render")]
+pub mod block_3d;
 pub mod draw_args;
 pub mod screen_uniform;
 pub mod shape_vertex;

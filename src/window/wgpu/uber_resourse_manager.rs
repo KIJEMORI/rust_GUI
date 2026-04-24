@@ -36,21 +36,21 @@ impl UberResourceManager {
 
         let mut indices = Vec::with_capacity(MAX_INDICES as usize);
         for i in 0..(MAX_VERTICES / 4) {
-            let offset = (i * 4) as u32;
+            let b = (i * 4) as u32;
             indices.extend_from_slice(&[
-                offset + 0,
-                offset + 1,
-                offset + 2,
-                offset + 2,
-                offset + 1,
-                offset + 3,
+                b + 0,
+                b + 1,
+                b + 2, // Первый треугольник
+                b + 2,
+                b + 3,
+                b + 0, // Второй треугольник (порядок важен для CW/CCW)
             ]);
         }
 
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Static Index Buffer"),
             contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
+            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
         });
 
         let indirect_buffer = device.create_buffer(&wgpu::BufferDescriptor {

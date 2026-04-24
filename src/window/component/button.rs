@@ -14,6 +14,7 @@ use crate::window::component::interface::drawable::{
 use crate::window::component::label::Label;
 
 use crate::window::component::layout::layout_context::LayoutContext;
+use crate::window::component::managers::atlas_manager::AtlasManager;
 
 pub struct Button {
     label: Label,
@@ -36,8 +37,9 @@ impl Drawable for Button {
         area: &Rect<f32, u16>,
         level: u32,
         id_parent: u32,
+        atlas: &mut AtlasManager,
     ) {
-        self.label.print(ctx, area, level, id_parent);
+        self.label.print(ctx, area, level, id_parent, atlas);
     }
     fn resize(
         &mut self,

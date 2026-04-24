@@ -1,7 +1,13 @@
 [package]
-name = "visual"
+name = "kj-light"
 version = "0.1.0"
+authors = ["Vladimir Kochnev <kijemori@gmail.com>"]
+description = "Ultra-fast SDF-based GUI and 3D interaction library. < 2.5ms frame time."
+license = "AGPL-3.0-only"
 edition = "2024"
+repository = "https://github.com/KIJEMORI/rust_GUI"
+keywords = ["gui", "sdf", "wgpu", "3d", "graphics"]
+categories = ["gui", "rendering", "graphics"]
 
 [dependencies]
 wgpu = "26.0.0"
@@ -13,3 +19,9 @@ mimalloc = "0.1"
 arboard = "3.6.1"
 fontdue = "0.9.3"
 rustc-hash = "2.1.0"
+rayon = "1.10.0"
+glam = { version = "0.29", features = ["bytemuck"] }
+
+[features]
+default = ["3d_render"]
+3d_render = []

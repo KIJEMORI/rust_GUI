@@ -1,5 +1,7 @@
 pub mod animation;
 pub mod base;
+#[cfg(feature = "3d_render")]
+pub mod block_3d;
 pub mod button;
 pub mod edit_label;
 pub mod glyph;

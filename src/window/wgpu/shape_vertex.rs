@@ -38,8 +38,8 @@ pub struct GPUShapeVertex {
     pub mask_pipeline: wgpu::RenderPipeline,
     pub content_pipeline: wgpu::RenderPipeline,
     pub unmask_pipeline: wgpu::RenderPipeline,
+    pub bind_group_layout: wgpu::BindGroupLayout,
     pub bind_group: wgpu::BindGroup,
-    pub active_shape_commands_count: u32,
 }
 
 use std::ops::Range;
@@ -231,164 +231,12 @@ impl GPUShapeVertex {
             cache: None,
         });
 
-        // let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        //     label: Some("Panel Vertex Buffer"),
-        //     size: MAX_VERTICES * std::mem::size_of::<ShapeVertex>() as u64,
-        //     usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, // ОБЯЗАТЕЛЬНО VERTEX
-        //     mapped_at_creation: false,
-        // });
-
-        // let mut indices = Vec::with_capacity(MAX_INDICES as usize);
-        // for i in (0..(MAX_VERTICES as u32)).step_by(4) {
-        //     indices.extend_from_slice(&[
-        //         i + 0,
-        //         i + 1,
-        //         i + 2, // Первый треугольник
-        //         i + 2,
-        //         i + 1,
-        //         i + 3, // Второй треугольник
-        //     ]);
-        // }
-
-        // let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        //     label: Some("Text Static Index Buffer"),
-        //     contents: bytemuck::cast_slice(&indices),
-        //     usage: wgpu::BufferUsages::INDEX,
-        // });
-
-        // let index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        //     label: Some("Panel Index Buffer"),
-        //     size: MAX_INDICES * std::mem::size_of::<u32>() as u64,
-        //     usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-        //     mapped_at_creation: false,
-        // });
-
-        // let shape_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        //     label: Some("Draw Vertex Buffer"),
-        //     size: MAX_VERTICES * std::mem::size_of::<DrawIndirectArgs>() as u64,
-        //     usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
-        //     mapped_at_creation: false,
-        // });
-
         Self {
-            // vertex_buffer: vertex_buffer,
-            // vertex_index_buffer: index_buffer,
             mask_pipeline: mask_pipeline,
             content_pipeline: content_pipeline,
             unmask_pipeline: unmask_pipeline,
+            bind_group_layout: bind_group_layout,
             bind_group: bind_group,
-            // shape_indirect_buffer: shape_buffer,
-            // shape_section_offsets: Vec::new(),
-            active_shape_commands_count: 0,
-            // next_free_vertex: 0,
         }
-    }
-
-    pub fn update_shape_indirect_buffer(
-        &mut self,
-        offsets: &[Range<usize>],
-        device: &Device,
-        queue: &Queue,
-        manager: &mut UberResourceManager,
-    ) {
-        let commands: Vec<DrawIndexedIndirectArgs> = offsets
-            .iter()
-            .map(|range| {
-                let vertex_count = (range.end - range.start) as u32;
-                let quad_count = vertex_count / 4;
-                DrawIndexedIndirectArgs {
-                    index_count: quad_count * 6,
-                    instance_count: 1,
-                    // Смещение в буфере индексов (каждые 4 вершины — это 6 индексов)
-                    first_index: (range.start / 4 * 6) as u32,
-                    base_vertex: 0,
-                    first_instance: 0,
-                }
-            })
-            .collect();
-
-        if commands.is_empty() {
-            //self.active_shape_commands_count = 0;
-            return;
-        }
-
-        let start_offset_bytes =
-            manager.active_shape_count as u64 * UberResourceManager::INDIRECT_SIZE;
-        let required_size =
-            start_offset_bytes + (commands.len() as u64 * UberResourceManager::INDIRECT_SIZE);
-
-        // Ресайз буфера команд если нужно
-        if manager.indirect_buffer.size() < required_size {
-            let new_size = required_size.next_power_of_two();
-            let new_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Expanded Indirect Buffer"),
-                size: new_size,
-                usage: wgpu::BufferUsages::INDIRECT
-                    | wgpu::BufferUsages::COPY_DST
-                    | wgpu::BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            });
-
-            // Копируем уже существующие команды (например, test_cmd или предыдущие слои)
-            let mut encoder =
-                device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-            encoder.copy_buffer_to_buffer(
-                &manager.indirect_buffer,
-                0,
-                &new_buffer,
-                0,
-                manager.indirect_buffer.size(),
-            );
-            queue.submit(std::iter::once(encoder.finish()));
-
-            manager.indirect_buffer = new_buffer;
-        }
-        queue.write_buffer(
-            &manager.indirect_buffer,
-            start_offset_bytes,
-            bytemuck::cast_slice(&commands),
-        );
-
-        let added_count = commands.len() as u32;
-        self.active_shape_commands_count = added_count; // Локальный счетчик этого менеджера
-        manager.active_shape_count += added_count;
-    }
-
-    pub fn render(
-        &mut self,
-        gpu_ctx: &mut GpuRenderContext, // Сделай &mut
-        device: &Device,
-        queue: &Queue,
-        manager: &mut UberResourceManager,
-    ) -> usize {
-        let len = gpu_ctx.shape_vertices.len();
-
-        {
-            let required_verts = gpu_ctx.shape_vertices.len();
-            let required_cmds = gpu_ctx.shape_section_offsets.len() as u32;
-
-            manager.ensure_vertex_capacity(device, queue, required_verts);
-            manager.ensure_index_capacity(device, required_verts);
-            manager.ensure_indirect_capacity(device, queue, required_cmds);
-        }
-
-        queue.write_buffer(
-            &manager.vertex_buffer,
-            0,
-            bytemuck::cast_slice(&gpu_ctx.shape_vertices),
-        );
-
-        let mut shape_idx = 0;
-        for cmd in &mut gpu_ctx.command_sections {
-            if let GpuCommand::Shape(s) = cmd {
-                s.command_index = shape_idx;
-                shape_idx += 1;
-            }
-        }
-
-        self.update_shape_indirect_buffer(&gpu_ctx.shape_section_offsets, device, queue, manager);
-
-        manager.next_free_vertex = len;
-        len
     }
 }

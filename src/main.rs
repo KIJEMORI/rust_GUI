@@ -1,8 +1,20 @@
 mod window;
 
+#[cfg(feature = "3d_render")]
+use std::cell::Cell;
 use std::rc::Rc;
 
+#[cfg(feature = "3d_render")]
+use crate::window::component::base::ui_3d_command::Ui3DCommand;
 use crate::window::component::base::ui_command::UiCommand;
+#[cfg(feature = "3d_render")]
+use crate::window::component::block_3d::model::cube::Cube;
+#[cfg(feature = "3d_render")]
+use crate::window::component::block_3d::model::sphere::Sphere;
+#[cfg(feature = "3d_render")]
+use crate::window::component::block_3d::model::tor::Tor;
+#[cfg(feature = "3d_render")]
+use crate::window::component::block_3d::viewport::Viewport3D;
 use crate::window::component::button::Button;
 use crate::window::component::edit_label::EditLabel;
 use crate::window::component::interface::component_control::{ComponentControlExt, LabelControl};
@@ -18,7 +30,7 @@ use crate::window::{
     component::interface::component_control::PanelControl,
 };
 
-fn main() {
+fn main_1() {
     let mut app = App::new();
     let layout = RowLayout::new();
     app.set_layout(layout);
@@ -27,7 +39,15 @@ fn main() {
     let layout = RowLayout::new();
     panel.set_layout(layout);
 
-    panel.as_dragable_mut().unwrap().set_dragable(true);
+    panel
+        .as_dragable_mut()
+        .unwrap()
+        .set_dragable(true)
+        .set_in_drag(UiCommand::SetPosition(
+            Cell::new(None),
+            Cell::new(0.0),
+            Cell::new(0.0),
+        ));
     //.set_rails(window::component::managers::drag_manager::DragRails::Horizontal);
 
     let mut label1 = EditLabel::new("Новая игра");
@@ -96,15 +116,15 @@ fn main() {
         let id = panel_setting.borrow().as_base().id;
         if let Some(hovearable) = panel_hov.borrow_mut().as_hoverable_mut() {
             hovearable
-                .set_on_mouse_enter(UiCommand::ChangeColor(Some(id), 0xFFAA0AA0))
-                .set_on_mouse_leave(UiCommand::ChangeColor(Some(id), 0xFFFFFF00));
+                .set_on_mouse_enter(UiCommand::ChangeColor(Cell::new(Some(id)), 0xFFAA0AA0))
+                .set_on_mouse_leave(UiCommand::ChangeColor(Cell::new(Some(id)), 0xFFFFFF00));
         }
     }
 
     //let mut button = Label::from_str("FFFFFFFFF FFFFFFFFFFFFFFF");
     let btn_action = UiCommand::Batch(vec![
-        UiCommand::ChangeColor(None, 0xFF00FFFF),
-        UiCommand::SetText(None, "Успешно!".into()),
+        UiCommand::ChangeColor(Cell::new(None), 0xFF00FFFF),
+        UiCommand::SetText(Cell::new(None), "Успешно!".into()),
     ]);
 
     let mut button = Button::new("Продолжить игру", btn_action);
@@ -197,4 +217,63 @@ fn main() {
     app.run();
 
     print!("lol");
+}
+
+#[cfg(feature = "3d_render")]
+fn main_2() {
+    let mut app = App::new();
+    let layout = RowLayout::new();
+    app.set_layout(layout);
+
+    let mut panel = Viewport3D::new();
+    let layout = RowLayout::new();
+    panel.set_layout(layout);
+
+    panel
+        .as_panel_control_mut()
+        .set_height(40)
+        .set_width(400)
+        .set_background(0xFFAAAAAA);
+
+    panel
+        .as_dragable_mut()
+        .unwrap()
+        .set_dragable(true)
+        .set_in_drag(
+            Ui3DCommand::RotateCamera(Cell::new(None), Cell::new(0.0), Cell::new(0.0)).build(),
+        );
+
+    let mut c = ConstBaseLayout::new();
+    c.set_relative_width(90);
+    c.set_relative_height(90);
+    panel
+        .as_layout_control_mut()
+        .set_const_layout(Some(Box::new(c)));
+
+    for i in 0..100 {
+        panel.add_model(Sphere::new(1.0, [0.0, 0.0 - 1.5 * i as f32, 0.0]));
+    }
+
+    panel.add_model(Tor::new(2.5, 0.5, [0.0, 1.5, 0.0]));
+
+    app.add(panel);
+
+    let mut label2 = Label::new("Настройки".to_string());
+    label2
+        .as_panel_control_mut()
+        .set_height(40)
+        .set_width(400)
+        .set_background(0xFFFF0000);
+    label2.set_font_color(0xFF000000);
+
+    app.add(label2);
+
+    app.run();
+
+    print!("lol");
+}
+
+fn main() {
+    //main_1();
+    main_2();
 }

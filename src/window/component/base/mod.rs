@@ -6,4 +6,6 @@ pub mod render_context;
 pub mod scroll;
 pub mod scroll_slider;
 pub mod settings;
+#[cfg(feature = "3d_render")]
+pub mod ui_3d_command;
 pub mod ui_command;

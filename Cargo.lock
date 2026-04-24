@@ -817,6 +817,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "glam"
+version = "0.29.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8babf46d4c1c9d92deac9f7be466f76dfc4482b6452fc5024b5e8daf6ffeb3ee"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "glow"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1057,6 +1066,23 @@ name = "khronos_api"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
+
+[[package]]
+name = "kj-light"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "bytemuck",
+ "fontdue",
+ "glam",
+ "image",
+ "mimalloc",
+ "pollster",
+ "rayon",
+ "rustc-hash 2.1.2",
+ "wgpu",
+ "winit",
+]
 
 [[package]]
 name = "lebe"
@@ -2477,21 +2503,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "visual"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "bytemuck",
- "fontdue",
- "image",
- "mimalloc",
- "pollster",
- "rustc-hash 2.1.2",
- "wgpu",
- "winit",
-]
 
 [[package]]
 name = "walkdir"

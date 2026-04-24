@@ -1,4 +1,7 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 use crate::{
     add_drawable_control,
@@ -19,8 +22,9 @@ use crate::{
         },
         layout::layout_context::LayoutContext,
         managers::{
-            button_manager::ButtonManager, drag_manager::DragManager, hover_manager::HoverManager,
-            id_manager::IDManager, scroll_manager::ScrollManager, select_manager::SelectManager,
+            atlas_manager::AtlasManager, button_manager::ButtonManager, drag_manager::DragManager,
+            hover_manager::HoverManager, id_manager::IDManager, scroll_manager::ScrollManager,
+            select_manager::SelectManager,
         },
         panel::Panel,
     },
@@ -79,6 +83,7 @@ impl Drawable for ScrollPanel {
         area: &Rect<f32, u16>,
         level: u32,
         id_parent: u32,
+        atlas: &mut AtlasManager,
     ) {
         self.panel.base.id_parent = id_parent;
         if self.panel.base.visible && self.panel.base.visible_on_this_frame {
@@ -123,7 +128,7 @@ impl Drawable for ScrollPanel {
             for child in self.panel.childs.iter() {
                 child
                     .borrow_mut()
-                    .print(ctx, &rect_child, next_level, self.panel.base.id);
+                    .print(ctx, &rect_child, next_level, self.panel.base.id, atlas);
             }
 
             if let Some(scroll) = &mut self.panel.scroll {
@@ -160,7 +165,7 @@ impl Drawable for ScrollPanel {
 
                     vertical_slider_panel.as_base_mut().rect = vertical_scroll_rect;
 
-                    vertical_slider_panel.print(ctx, &rect, level + 1, self.panel.base.id);
+                    vertical_slider_panel.print(ctx, &rect, level + 1, self.panel.base.id, atlas);
                 }
                 if self.horizontal_slider {
                     let mut horizontal_slider_panel = self.horizontal_slider_panel.borrow_mut();
@@ -195,7 +200,7 @@ impl Drawable for ScrollPanel {
 
                     horizontal_slider_panel.as_base_mut().rect = horizontal_scroll_rect;
 
-                    horizontal_slider_panel.print(ctx, &rect, level + 1, self.panel.base.id);
+                    horizontal_slider_panel.print(ctx, &rect, level + 1, self.panel.base.id, atlas);
                     //ctx.push_rect_sdf(&horizontal_scroll_rect, color, border, level, false, false);
                 }
             }
@@ -255,9 +260,9 @@ impl Drawable for ScrollPanel {
                         (scroll.height - scroll.slider_height) as f32 / free_space;
 
                     dragable.set_in_drag(UiCommand::ScrollPanel(
-                        Some(id),
-                        0.0,
-                        content_to_track_ratio, // Множитель для Y
+                        Cell::new(Some(id)),
+                        Cell::new(0.0),
+                        Cell::new(content_to_track_ratio), // Множитель для Y
                     ));
                 }
 
@@ -305,9 +310,9 @@ impl Drawable for ScrollPanel {
                         (scroll.width - scroll.slider_width) as f32 / free_space;
 
                     dragable.set_in_drag(UiCommand::ScrollPanel(
-                        Some(id),
-                        content_to_track_ratio,
-                        0.0,
+                        Cell::new(Some(id)),
+                        Cell::new(content_to_track_ratio),
+                        Cell::new(0.0),
                     ));
                 }
 

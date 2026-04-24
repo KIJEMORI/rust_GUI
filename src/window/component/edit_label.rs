@@ -1,4 +1,5 @@
 use std::{
+    cell::Cell,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -20,6 +21,7 @@ use crate::{
         },
         label::Label,
         layout::layout_context::LayoutContext,
+        managers::atlas_manager::AtlasManager,
     },
 };
 
@@ -35,7 +37,7 @@ impl EditLabel {
         label
             .as_clickable_mut()
             .unwrap()
-            .set_on_click(UiCommand::EditLabel(None));
+            .set_on_click(UiCommand::EditLabel(Cell::new(None)));
 
         label.as_scrollable_mut().unwrap().set_scrolable();
 
@@ -53,11 +55,11 @@ impl EditLabel {
 
         steps.push(AnimationStep {
             delay: Duration::from_millis(500),
-            action: UiCommand::Custom(None, Rc::new(on_cursor)),
+            action: UiCommand::Custom(Cell::new(None), Rc::new(on_cursor)),
         });
         steps.push(AnimationStep {
             delay: Duration::from_millis(500),
-            action: UiCommand::Custom(None, Rc::new(off_cursor)),
+            action: UiCommand::Custom(Cell::new(None), Rc::new(off_cursor)),
         });
 
         let animation = AnimationSequence {
@@ -89,8 +91,9 @@ impl Drawable for EditLabel {
         area: &Rect<f32, u16>,
         level: u32,
         id_parent: u32,
+        atlas: &mut AtlasManager,
     ) {
-        self.label.print(ctx, area, level, id_parent);
+        self.label.print(ctx, area, level, id_parent, atlas);
     }
     fn resize(
         &mut self,

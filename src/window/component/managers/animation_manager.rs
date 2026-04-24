@@ -1,7 +1,8 @@
 use std::{sync::mpsc::Sender, time::Instant};
 
 use crate::window::component::{
-    animation::animation_action::AnimationSequence, base::ui_command::UiCommand,
+    animation::animation_action::AnimationSequence,
+    base::ui_command::{CommandTrait, UiCommand},
     managers::id_manager::IDManager,
 };
 

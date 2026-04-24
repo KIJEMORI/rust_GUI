@@ -2,9 +2,9 @@ use crate::window::component::base::area::Rect;
 use crate::window::component::base::component_type::SharedDrawable;
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
 use crate::window::component::base::settings::Settings;
-use crate::window::component::base::ui_command::UiCommand;
+use crate::window::component::base::ui_command::{CommandTrait, UiCommand};
 use crate::window::component::interface::component_control::ComponentControl;
-use crate::window::component::interface::drawable::{Drawable, InternalAccess};
+use crate::window::component::interface::drawable::InternalAccess;
 use crate::window::component::interface::layout::Layout;
 use crate::window::component::layout::layout_context::LayoutContext;
 use crate::window::component::managers::animation_manager::AnimationManager;
@@ -80,14 +80,7 @@ impl Default for AppWinit {
             commands_tx: tx,
             commands_rx: rx,
             next_redraw: None,
-            gpu_ctx: GpuRenderContext {
-                shape_vertices: Vec::with_capacity(1024),
-                shape_section_offsets: Vec::with_capacity(1024),
-                shape_indices: Vec::with_capacity(1024),
-                texts: Vec::with_capacity(100),
-                text_storage: String::with_capacity(4096),
-                command_sections: Vec::with_capacity(1024),
-            },
+            gpu_ctx: GpuRenderContext::new(),
             last_render: Instant::now(),
             modifiers: Modifiers::default(),
         }
@@ -103,8 +96,6 @@ impl AppWinit {
 
             let width = window_size.width as u16;
             let height = window_size.height as u16;
-
-            state.text_vertex.section_hashes.fill(0);
 
             self.panel
                 .borrow_mut()
@@ -153,7 +144,9 @@ impl AppWinit {
 
         let rect = &self.panel.borrow().as_base().rect.clone();
 
-        self.panel.borrow_mut().print(&mut self.gpu_ctx, rect, 1, 0);
+        self.panel
+            .borrow_mut()
+            .print(&mut self.gpu_ctx, rect, 1, 0, &mut state.text_vertex.atlas);
 
         state.prepare_gpu_data(&mut self.gpu_ctx);
 
@@ -182,7 +175,7 @@ impl AppWinit {
                             b: 0.3,
                             a: 1.0,
                         }), // Очистка фона
-                        store: wgpu::StoreOp::Store,
+                        store: wgpu::StoreOp::Discard,
                     },
                     depth_slice: None,
                 })],
@@ -254,11 +247,14 @@ impl AppWinit {
             | UiCommand::SetText(_, _)
             | UiCommand::RequestRedraw()
             | UiCommand::Custom(_, _)
-            | UiCommand::ScrollPanel(_, _, _) => {
+            | UiCommand::ScrollPanel(_, _, _)
+            | UiCommand::SetPosition(_, _, _)
+            | UiCommand::Other(_) => {
                 *needs_layout = true;
             }
 
             UiCommand::EditLabel(el) => {
+                let el = el.get();
                 if let Some(el) = el {
                     if let Some(state) = &self.state {
                         let layout_context = LayoutContext {
@@ -282,21 +278,25 @@ impl AppWinit {
                 });
             }
             UiCommand::SetOnClick(id, _) => {
-                if let Some(el) = get_upgrade_by_id(&id, &self.id_manager) {
+                let id = &id.get();
+                if let Some(el) = get_upgrade_by_id(id, &self.id_manager) {
                     self.button_manager.add(el.borrow().as_base().id);
                 }
             }
             UiCommand::SetOnMouseEnter(id, _) => {
+                let id = &id.get();
                 if let Some(id) = id {
-                    self.hover_manager.add(id);
+                    self.hover_manager.add(*id);
                 }
             }
             UiCommand::SetOnMouseLeave(id, _) => {
+                let id = &id.get();
                 if let Some(id) = id {
-                    self.hover_manager.add(id);
+                    self.hover_manager.add(*id);
                 }
             }
             UiCommand::StartAnimation(id) => {
+                let id = &id.get();
                 if let Some(id) = id {
                     self.animation_manager.start(&id, &self.id_manager);
                 }
@@ -509,9 +509,9 @@ impl ApplicationHandler for AppWinit {
                         scroll_amount_y,
                         &self.id_manager,
                     ) {
-                        if let Some(state) = self.state.as_mut() {
-                            state.text_vertex.section_hashes.fill(0);
-                        }
+                        // if let Some(state) = self.state.as_mut() {
+                        //     state.text_vertex.section_hashes.fill(0);
+                        // }
                         if let Some(w) = &self.window {
                             w.request_redraw();
                         }

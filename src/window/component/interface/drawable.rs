@@ -9,6 +9,8 @@ use crate::window::component::base::gpu_render_context::GpuRenderContext;
 use crate::window::component::base::scroll::Scroll;
 use crate::window::component::base::settings::Settings;
 use crate::window::component::base::ui_command::UiCommand;
+use crate::window::component::interface::drawable_3d::ViewportControl;
+use crate::window::component::managers::atlas_manager::AtlasManager;
 use crate::window::component::managers::button_manager::ButtonManager;
 use crate::window::component::managers::drag_manager::{DragManager, DragRails};
 use crate::window::component::managers::hover_manager::HoverManager;
@@ -103,6 +105,7 @@ pub trait Drawable: Any {
         area: &Rect<f32, u16>,
         level: u32,
         id_parent: u32,
+        atlas: &mut AtlasManager,
     );
 
     fn resize(
@@ -199,6 +202,15 @@ pub trait Drawable: Any {
         None
     }
     fn as_dragable_mut(&mut self) -> Option<&mut dyn DragableDrawable> {
+        None
+    }
+
+    #[cfg(feature = "3d_render")]
+    fn as_viewport_control(&self) -> Option<&dyn ViewportControl> {
+        None
+    }
+    #[cfg(feature = "3d_render")]
+    fn as_viewport_control_mut(&mut self) -> Option<&mut dyn ViewportControl> {
         None
     }
 }

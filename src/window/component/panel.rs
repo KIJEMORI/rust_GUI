@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::add_drawable_control;
@@ -9,7 +9,7 @@ use crate::window::component::base::component_type::SharedDrawable;
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
 use crate::window::component::base::scroll::Scroll;
 use crate::window::component::base::settings::Settings;
-use crate::window::component::base::ui_command::UiCommand;
+use crate::window::component::base::ui_command::{CommandTrait, UiCommand};
 use crate::window::component::interface::component_control::{
     ComponentControl, ComponentControlExt, PanelControl,
 };
@@ -22,6 +22,7 @@ use crate::window::component::interface::layout::Layout;
 use crate::window::component::layout::base_layout::{Align, BaseLayout};
 use crate::window::component::layout::const_base_layout::{ConstBaseLayout, Direction};
 use crate::window::component::layout::layout_context::LayoutContext;
+use crate::window::component::managers::atlas_manager::AtlasManager;
 use crate::window::component::managers::button_manager::ButtonManager;
 use crate::window::component::managers::drag_manager::{DragManager, DragRails};
 use crate::window::component::managers::hover_manager::HoverManager;
@@ -184,7 +185,7 @@ impl AnimationDrawable for Panel {
         if !self.animation.is_empty() {
             self.base.run_base_animation = true;
             self.base.run_loop_animation = true;
-            let mut command_to_send = UiCommand::StartAnimation(None);
+            let mut command_to_send = UiCommand::StartAnimation(Cell::new(None));
             command_to_send.fill_ref(&self.base.id);
 
             if let Some(tx) = &self.base.settings.command_tx {
@@ -331,7 +332,7 @@ impl DragableDrawable for Panel {
     fn start_drag(&mut self) {
         self.layout.as_mut().set_align(Align::FreeRun);
         if let Some(cmd) = &self.on_drag {
-            let mut command_to_send = cmd.clone();
+            let command_to_send = cmd.clone();
 
             command_to_send.fill_ref(&self.base.id);
 
@@ -341,40 +342,28 @@ impl DragableDrawable for Panel {
         }
     }
     fn drag(&mut self, mx_offset: f32, my_offset: f32) {
-        let rect = &self.base.rect;
-        let mut x1 = rect.x1;
-        let mut y1 = rect.y1;
-
         let mut mx_offset = mx_offset;
         let mut my_offset = my_offset;
 
         match &self.drag_rails {
             DragRails::Horizontal => {
-                x1 += mx_offset;
                 my_offset = 0.0;
             }
-            DragRails::Vertical => {
-                y1 += my_offset;
-                mx_offset = 0.0
-            }
-            DragRails::None => {
-                x1 += mx_offset;
-                y1 += my_offset;
-            }
+            DragRails::Vertical => mx_offset = 0.0,
+            DragRails::None => {}
         }
 
         if let Some(cmd) = &self.in_drag {
-            let mut command_to_send = cmd.clone();
+            let command_to_send = cmd.clone();
 
             command_to_send.fill_ref(&self.base.id);
+
             command_to_send.fill_coord(mx_offset, my_offset);
 
             if let Some(tx) = &self.base.settings.command_tx {
                 let _ = tx.send(command_to_send);
             }
         }
-
-        self.set_position(x1, y1);
     }
     fn stop_drag(&mut self) {
         if let Some(cmd) = &self.on_drop {
@@ -412,6 +401,7 @@ impl Drawable for Panel {
         area: &Rect<f32, u16>,
         level: u32,
         id_parent: u32,
+        atlas: &mut AtlasManager,
     ) {
         self.base.id_parent = id_parent;
         if self.base.visible && self.base.visible_on_this_frame {
@@ -422,6 +412,10 @@ impl Drawable for Panel {
             let mut y1 = rect.y1 + area.y1;
 
             rect.set_position(x1, y1);
+
+            if !rect.intersection(area) {
+                return;
+            }
 
             ctx.push_rect_sdf(
                 &rect,
@@ -458,7 +452,7 @@ impl Drawable for Panel {
             for child in self.childs.iter() {
                 child
                     .borrow_mut()
-                    .print(ctx, &rect_child, next_level, self.base.id);
+                    .print(ctx, &rect_child, next_level, self.base.id, atlas);
             }
 
             ctx.push_rect_sdf(

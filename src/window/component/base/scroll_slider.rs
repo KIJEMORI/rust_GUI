@@ -10,6 +10,7 @@ use crate::{
             },
         },
         layout::layout_context::LayoutContext,
+        managers::atlas_manager::AtlasManager,
         panel::Panel,
     },
 };
@@ -33,11 +34,12 @@ impl Drawable for ScrollSlider {
         area: &Rect<f32, u16>,
         level: u32,
         id_parent: u32,
+        atlas: &mut AtlasManager,
     ) {
         // self.panel.base.id_parent = id_parent;
         // if self.panel.base.visible && self.panel.base.visible_on_this_frame {
         //     self.panel.base.set_parent_rect(area.clone());
-        self.panel.print(ctx, area, level, id_parent);
+        self.panel.print(ctx, area, level, id_parent, atlas);
         //}
     }
 
@@ -173,7 +175,7 @@ impl Drawable for ScrollSlider {
         return rect;
     }
 
-    fn hover(&self, mx: u16, my: u16, area: &Rect<f32, u16>) -> bool {
+    fn hover(&self, mx: u16, my: u16, _area: &Rect<f32, u16>) -> bool {
         let mut panel_rect = self.panel.base.rect.clone();
         let parent_rect = &self.panel.base.parent_rect;
 

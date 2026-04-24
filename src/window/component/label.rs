@@ -14,6 +14,7 @@ use crate::window::component::interface::drawable::{
     ScrollableDrawable, SelectableDrawable,
 };
 use crate::window::component::layout::layout_context::LayoutContext;
+use crate::window::component::managers::atlas_manager::AtlasManager;
 use crate::window::component::panel::Panel;
 
 pub struct Label {
@@ -291,6 +292,7 @@ impl Drawable for Label {
         area: &Rect<f32, u16>,
         level: u32,
         id_parent: u32,
+        atlas: &mut AtlasManager,
     ) {
         self.as_base_mut().id_parent = id_parent;
         if self.panel.base.visible_on_this_frame {
@@ -327,7 +329,7 @@ impl Drawable for Label {
                 y1 += offset.1;
             }
 
-            ctx.push_text(&self.text, x1, y1, self.scale, self.color, level);
+            ctx.push_text(atlas, &self.text, x1, y1, self.scale, self.color, level);
 
             if self.cursor_need {
                 let mut cursor_rect = self.cursor.clone();
