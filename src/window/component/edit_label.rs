@@ -9,7 +9,7 @@ use crate::{
     window::component::{
         animation::animation_action::{AnimationSequence, AnimationStep},
         base::{
-            area::Rect, base::Base, component_type::SharedDrawable,
+            area::Area, base::Base, component_type::SharedDrawable,
             gpu_render_context::GpuRenderContext, ui_command::UiCommand,
         },
         interface::{
@@ -39,7 +39,7 @@ impl EditLabel {
             .unwrap()
             .set_on_click(UiCommand::EditLabel(Cell::new(None)));
 
-        label.as_scrollable_mut().unwrap().set_scrolable();
+        label.as_scrollable_mut().unwrap().set_scrolable(true);
 
         let mut steps = Vec::new();
         let on_cursor = |el: SharedDrawable| {
@@ -88,19 +88,14 @@ impl Drawable for EditLabel {
     fn print(
         &mut self,
         ctx: &mut GpuRenderContext,
-        area: &Rect<f32, u16>,
+        area: &Area,
         level: u32,
         id_parent: u32,
         atlas: &mut AtlasManager,
     ) {
         self.label.print(ctx, area, level, id_parent, atlas);
     }
-    fn resize(
-        &mut self,
-        area: &Rect<f32, u16>,
-        ctx: &LayoutContext,
-        auto_size: bool,
-    ) -> Rect<f32, u16> {
+    fn resize(&mut self, area: &Area, ctx: &LayoutContext, auto_size: bool) -> Area {
         self.label.resize(area, ctx, auto_size)
     }
     fn resize_one(&mut self, ctx: &LayoutContext) {
@@ -117,7 +112,7 @@ impl Drawable for EditLabel {
         self
     }
 
-    fn hover(&self, mx: u16, my: u16, area: &Rect<f32, u16>) -> bool {
+    fn hover(&self, mx: u16, my: u16, area: &Area) -> bool {
         self.label.hover(mx, my, area)
     }
     fn as_panel_control(&self) -> &dyn PanelControl {

@@ -1,7 +1,12 @@
 use crate::{
     add_drawable_control,
     window::component::{
-        base::{area::Rect, base::Base, gpu_render_context::GpuRenderContext, settings::Settings},
+        base::{
+            area::{Area, AreaMath},
+            base::Base,
+            gpu_render_context::GpuRenderContext,
+            settings::Settings,
+        },
         interface::{
             component_control::PanelControl,
             drawable::{
@@ -31,7 +36,7 @@ impl Drawable for ScrollSlider {
     fn print(
         &mut self,
         ctx: &mut GpuRenderContext,
-        area: &Rect<f32, u16>,
+        area: &Area,
         level: u32,
         id_parent: u32,
         atlas: &mut AtlasManager,
@@ -43,12 +48,7 @@ impl Drawable for ScrollSlider {
         //}
     }
 
-    fn resize(
-        &mut self,
-        area: &Rect<f32, u16>,
-        ctx: &LayoutContext,
-        auto_size: bool,
-    ) -> Rect<f32, u16> {
+    fn resize(&mut self, area: &Area, ctx: &LayoutContext, auto_size: bool) -> Area {
         let rect = self.panel.resize(area, ctx, auto_size);
 
         let id = self.as_base().id;
@@ -175,7 +175,7 @@ impl Drawable for ScrollSlider {
         return rect;
     }
 
-    fn hover(&self, mx: u16, my: u16, _area: &Rect<f32, u16>) -> bool {
+    fn hover(&self, mx: u16, my: u16, _area: &Area) -> bool {
         let mut panel_rect = self.panel.base.rect.clone();
         let parent_rect = &self.panel.base.parent_rect;
 

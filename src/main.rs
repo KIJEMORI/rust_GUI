@@ -1,3 +1,4 @@
+mod disk;
 mod window;
 
 #[cfg(feature = "3d_render")]
@@ -239,9 +240,13 @@ fn main_2() {
         .as_dragable_mut()
         .unwrap()
         .set_dragable(true)
-        .set_in_drag(
-            Ui3DCommand::RotateCamera(Cell::new(None), Cell::new(0.0), Cell::new(0.0)).build(),
-        );
+        .set_in_drag(Ui3DCommand::rotate_camera());
+
+    panel
+        .as_scrollable_mut()
+        .unwrap()
+        .set_scrolable(true)
+        .set_on_scroll(Ui3DCommand::change_distance_camera());
 
     let mut c = ConstBaseLayout::new();
     c.set_relative_width(90);
@@ -251,10 +256,19 @@ fn main_2() {
         .set_const_layout(Some(Box::new(c)));
 
     for i in 0..100 {
-        panel.add_model(Sphere::new(1.0, [0.0, 0.0 - 1.5 * i as f32, 0.0]));
+        for j in 0..100 {
+            panel.add_model(Sphere::new(
+                1.0,
+                [
+                    -100.0 / 2.0 + 1.5 * i as f32,
+                    100.0 / 2.0 - 1.5 * j as f32,
+                    0.0,
+                ],
+            ));
+        }
     }
 
-    panel.add_model(Tor::new(2.5, 0.5, [0.0, 1.5, 0.0]));
+    // panel.add_model(Tor::new(2.5, 0.5, [0.0, 1.5, 0.0]));
 
     app.add(panel);
 

@@ -1,7 +1,7 @@
 use winit::keyboard::SmolStr;
 
 use crate::window::component::{
-    base::{area::Rect, component_type::SharedDrawable},
+    base::{area::Area, component_type::SharedDrawable},
     interface::{drawable::Drawable, layout::Layout},
     layout::layout_context::LayoutContext,
 };
@@ -24,8 +24,8 @@ pub trait PanelControl {
     fn set_position(&mut self, x: f32, y: f32) -> &mut dyn PanelControl;
     fn set_height(&mut self, h: u16) -> &mut dyn PanelControl;
     fn set_width(&mut self, w: u16) -> &mut dyn PanelControl;
-    fn get_rect(&self) -> &Rect<f32, u16>;
-    fn get_rect_without_offset(&self, rect: &Rect<f32, u16>) -> Rect<f32, u16>;
+    fn get_rect(&self) -> &Area;
+    fn get_rect_without_offset(&self, rect: &Area) -> Area;
 }
 
 #[allow(dead_code)]

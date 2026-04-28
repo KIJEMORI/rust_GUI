@@ -14,7 +14,7 @@ impl Sphere {
         };
         Model {
             is_dirty: true,
-            id_model: 0,
+            id_model: None,
             transform: transform,
             params: [SHAPE_SPHERE, radius, 0.0, 0.0],
             color: 0xFFFF0000,

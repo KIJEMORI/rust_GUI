@@ -1,4 +1,4 @@
-use crate::window::component::base::area::Rect;
+use crate::window::component::base::area::{Area, AreaMath};
 use crate::window::component::interface::const_layout::ConstLayout;
 use crate::window::component::interface::layout::Layout;
 use crate::window::component::layout::base_layout::BaseLayout;
@@ -35,18 +35,13 @@ impl Layout for ColumnLayout {
         self.base.set_const_layout(const_layout);
     }
 
-    fn calculate(&self, area: &Rect<f32, u16>, parent_area: &Rect<f32, u16>) -> Rect<f32, u16> {
+    fn calculate(&self, area: &Area, parent_area: &Area) -> Area {
         self.base.calculate(area, parent_area)
     }
-    fn padding_area(&self, area: &Rect<f32, u16>) -> Rect<f32, u16> {
+    fn padding_area(&self, area: &Area) -> Area {
         self.base.padding_area(area)
     }
-    fn next(
-        &self,
-        area: &Rect<f32, u16>,
-        parent_area: &Rect<f32, u16>,
-        margin: Direction,
-    ) -> (Rect<f32, u16>, bool) {
+    fn next(&self, area: &Area, parent_area: &Area, margin: Direction) -> (Area, bool) {
         let offset_x = margin.right;
         let offset_y = margin.up;
         let x1 = area.get_x2() + offset_x.max(0) as f32;
@@ -54,9 +49,9 @@ impl Layout for ColumnLayout {
         let x2 = parent_area.get_x2();
         let y2 = parent_area.get_y2();
 
-        (Rect::new_from_coord((x1, y1), (x2, y2)), x1 < x2)
+        (Area::new_from_coord((x1, y1), (x2, y2)), x1 < x2)
     }
-    fn decrease(&self, area: &Rect<f32, u16>, parent_area: &Rect<f32, u16>) -> Rect<f32, u16> {
+    fn decrease(&self, area: &Area, parent_area: &Area) -> Area {
         self.base.decrease(area, parent_area)
     }
     fn set_align(&mut self, align: super::base_layout::Align) {

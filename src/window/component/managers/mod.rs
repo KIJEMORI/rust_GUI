@@ -1,5 +1,6 @@
 pub mod animation_manager;
 pub mod atlas_manager;
+pub mod brick_3d_manager;
 pub mod button_manager;
 pub mod drag_manager;
 pub mod edit_label_manager;

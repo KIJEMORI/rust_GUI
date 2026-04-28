@@ -35,6 +35,10 @@ impl OrbitCamera {
         self.pitch = (self.pitch + dy).clamp(-1.5, 1.5);
     }
 
+    pub fn change_distance(&mut self, dx: f32, dy: f32) {
+        self.distance = (self.distance + dy).clamp(0.0, 300.0);
+    }
+
     pub fn update_uniform(&self, aspect: f32) -> CameraUniform {
         // Вычисляем позицию камеры на основе углов (сферические координаты)
         let eye = Vec3::new(

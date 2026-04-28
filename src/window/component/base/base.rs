@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Weak};
 
 use crate::window::component::{
     base::{
-        area::Rect,
+        area::Area,
         component_type::SharedDrawable,
         settings::{Settings, get_settings},
     },
@@ -11,8 +11,8 @@ use crate::window::component::{
 pub struct Base {
     pub id: u32,
     pub id_parent: u32,
-    pub rect: Rect<f32, u16>,
-    pub parent_rect: Rect<f32, u16>,
+    pub rect: Area,
+    pub parent_rect: Area,
     pub visible: bool,
     pub settings: Settings,
     pub self_ref: Option<Weak<RefCell<dyn Drawable>>>,
@@ -23,7 +23,7 @@ pub struct Base {
 
 #[allow(dead_code)]
 impl Base {
-    pub fn new(rect: Rect<f32, u16>) -> Base {
+    pub fn new(rect: Area) -> Base {
         Base {
             id: 0,
             id_parent: 0,
@@ -67,7 +67,7 @@ impl Base {
     //     self.last_interaction = Instant::now();
     // }
     //
-    pub fn set_parent_rect(&mut self, rect: Rect<f32, u16>) {
+    pub fn set_parent_rect(&mut self, rect: Area) {
         self.parent_rect = rect
     }
 }

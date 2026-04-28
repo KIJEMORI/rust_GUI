@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use crate::add_drawable_control;
 use crate::window::component::animation::animation_action::AnimationSequence;
-use crate::window::component::base::area::Rect;
+use crate::window::component::base::area::{Area, AreaMath};
 use crate::window::component::base::base::Base;
 use crate::window::component::base::component_type::SharedDrawable;
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
@@ -41,6 +41,7 @@ pub struct Panel {
     on_click: Option<UiCommand>,
     on_mouse_enter: Option<UiCommand>,
     on_mouse_leave: Option<UiCommand>,
+    pub on_scrol: Option<UiCommand>,
     on_drag: Option<UiCommand>,
     in_drag: Option<UiCommand>,
     on_drop: Option<UiCommand>,
@@ -73,7 +74,7 @@ impl Panel {
 
 impl Default for Panel {
     fn default() -> Panel {
-        let base = Base::new(Rect::new(0.0, 0.0, 0, 0));
+        let base = Base::new(Area::new(0.0, 0.0, 0, 0));
 
         Panel {
             childs: Vec::new(),
@@ -84,6 +85,7 @@ impl Default for Panel {
             on_click: None,
             on_mouse_enter: None,
             on_mouse_leave: None,
+            on_scrol: None,
             on_drag: None,
             in_drag: None,
             on_drop: None,
@@ -111,7 +113,7 @@ impl ClickableDrawable for Panel {
 
     fn on_click(&self) {
         if let Some(cmd) = &self.on_click {
-            let mut command_to_send = cmd.clone();
+            let command_to_send = cmd.clone();
 
             command_to_send.fill_ref(&self.base.id);
 
@@ -128,7 +130,7 @@ impl HoverableDrawable for Panel {
     }
     fn on_mouse_enter(&self) {
         if let Some(cmd) = &self.on_mouse_enter {
-            let mut command_to_send = cmd.clone();
+            let command_to_send = cmd.clone();
 
             command_to_send.fill_ref(&self.base.id);
 
@@ -139,7 +141,7 @@ impl HoverableDrawable for Panel {
     }
     fn on_mouse_leave(&self) {
         if let Some(cmd) = &self.on_mouse_leave {
-            let mut command_to_send = cmd.clone();
+            let command_to_send = cmd.clone();
 
             command_to_send.fill_ref(&self.base.id);
 
@@ -185,7 +187,7 @@ impl AnimationDrawable for Panel {
         if !self.animation.is_empty() {
             self.base.run_base_animation = true;
             self.base.run_loop_animation = true;
-            let mut command_to_send = UiCommand::StartAnimation(Cell::new(None));
+            let command_to_send = UiCommand::StartAnimation(Cell::new(None));
             command_to_send.fill_ref(&self.base.id);
 
             if let Some(tx) = &self.base.settings.command_tx {
@@ -228,15 +230,19 @@ impl ScrollableDrawable for Panel {
     fn is_scrollable(&self) -> bool {
         self.scroll.is_some()
     }
-    fn set_scrolable(&mut self) -> &mut dyn ScrollableDrawable {
-        self.scroll = Some(Box::new(Scroll::new()));
+    fn set_on_scroll(&mut self, cmd: UiCommand) -> &mut dyn ScrollableDrawable {
+        self.on_scrol = Some(cmd);
         self
     }
-    fn remove_scrolable(&mut self) -> &mut dyn ScrollableDrawable {
-        self.scroll = None;
-        return self;
+    fn set_scrolable(&mut self, tumbler: bool) -> &mut dyn ScrollableDrawable {
+        if tumbler {
+            self.scroll = Some(Box::new(Scroll::new()));
+        } else {
+            self.scroll = None
+        }
+        self
     }
-    fn set_offset(&mut self, x: f32, y: f32, area: &Rect<f32, u16>) {
+    fn set_offset(&mut self, x: f32, y: f32, area: &Area) {
         let rect = &self.base.rect;
         let y1 = rect.y1 + y;
 
@@ -270,7 +276,7 @@ impl ScrollableDrawable for Panel {
 
                     let mut child = child.borrow_mut();
 
-                    let child_rect = child.as_panel_control_mut().get_rect();
+                    let child_rect = child.as_panel_control().get_rect();
 
                     let item_height = child_rect.max.get_height() as f32;
                     let item_bottom = item_top + item_height;
@@ -284,7 +290,7 @@ impl ScrollableDrawable for Panel {
                         child.as_base_mut().visible_on_this_frame = true;
                     }
 
-                    let margin = child.as_layout_control_mut().get_margin();
+                    let margin = child.as_layout_control().get_margin();
 
                     offset.1 += item_height + margin.up as f32 + margin.down as f32;
                 }
@@ -398,7 +404,7 @@ impl Drawable for Panel {
     fn print(
         &mut self,
         ctx: &mut GpuRenderContext,
-        area: &Rect<f32, u16>,
+        area: &Area,
         level: u32,
         id_parent: u32,
         atlas: &mut AtlasManager,
@@ -466,12 +472,7 @@ impl Drawable for Panel {
         }
     }
 
-    fn resize(
-        &mut self,
-        area: &Rect<f32, u16>,
-        ctx: &LayoutContext,
-        auto_size: bool,
-    ) -> Rect<f32, u16> {
+    fn resize(&mut self, area: &Area, ctx: &LayoutContext, auto_size: bool) -> Area {
         self.layout.set_auto_scale(auto_size);
 
         let mut rect = self.layout.calculate(&self.base.rect, area);
@@ -624,7 +625,7 @@ impl Drawable for Panel {
         self
     }
 
-    fn hover(&self, mx: u16, my: u16, area: &Rect<f32, u16>) -> bool {
+    fn hover(&self, mx: u16, my: u16, area: &Area) -> bool {
         let mut panel_rect = self.base.rect.clone();
         let parent_rect = &self.base.parent_rect;
 
@@ -778,10 +779,10 @@ impl PanelControl for Panel {
         self.base.set_width(w);
         self
     }
-    fn get_rect(&self) -> &Rect<f32, u16> {
+    fn get_rect(&self) -> &Area {
         &self.base.rect
     }
-    fn get_rect_without_offset(&self, rect: &Rect<f32, u16>) -> Rect<f32, u16> {
+    fn get_rect_without_offset(&self, rect: &Area) -> Area {
         let mut rect = rect.clone();
         if let Some(scroll) = self.scroll.as_ref() {
             let offset = scroll.get_offset();

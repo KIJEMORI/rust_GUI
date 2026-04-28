@@ -2,17 +2,17 @@ use std::ops::Range;
 
 #[cfg(feature = "3d_render")]
 use glam::{Mat4, Vec3};
-#[cfg(feature = "3d_render")]
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
+use crate::window::component::base::area::{Area, AreaMath};
 #[cfg(feature = "3d_render")]
 use crate::window::component::block_3d::model::model::Model;
 
+use crate::window::component::managers::brick_3d_manager::BrickManager;
 #[cfg(feature = "3d_render")]
 use crate::window::wgpu::block_3d::{camera_uniform::CameraUniform, instance::Instance3DData};
 
 use crate::window::{
-    component::{base::area::Rect, managers::atlas_manager::AtlasManager, theme::border::Border},
+    component::{managers::atlas_manager::AtlasManager, theme::border::Border},
     wgpu::{
         draw_args::DrawIndexedIndirectArgs,
         shape_vertex::{SHAPE_LINE, SHAPE_RECT, SHAPE_TEXT, ShapeVertex},
@@ -209,7 +209,7 @@ impl GpuRenderContext {
 
     pub fn push_rect_sdf(
         &mut self,
-        rect: &Rect<f32, u16>,
+        rect: &Area,
         color: u32,
         border: &Border,
         level: u32,
@@ -286,7 +286,7 @@ impl GpuRenderContext {
     }
 
     #[cfg(feature = "3d_render")]
-    pub fn push_3d_viewport(&mut self, rect: &Rect<f32, u16>, models: &[&Model], level: u32) {
+    pub fn push_3d_viewport(&mut self, rect: &Area, models: &[Model], level: u32) {
         // Запоминаем индекс первого инстанса для этой группы моделей
         let first_instance = self.instances_3d.len() as u32;
 
@@ -300,7 +300,7 @@ impl GpuRenderContext {
                 inv_transform: model.transform.to_inv_matrix(),
                 color: color_to_gpu(model.color),
                 params,
-                entity_id: model.id_model,
+                entity_id: model.id_model.unwrap_or(0),
                 _padding: [0; 2],
             });
         }
@@ -359,7 +359,7 @@ impl GpuRenderContext {
     }
 
     #[cfg(feature = "3d_render")]
-    pub fn push_model_instance(&mut self, model: &Model, rect: &Rect<f32, u16>, level: u32) {
+    pub fn push_model_instance(&mut self, model: &Model, rect: &Area, level: u32) {
         // Запоминаем текущий индекс в буфере инстансов
         let first_instance = self.instances_3d.len() as u32;
 
@@ -370,7 +370,7 @@ impl GpuRenderContext {
             inv_transform: model.transform.to_inv_matrix(),
             color: color_to_gpu(model.color),
             params: params, // Здесь лежит tag (сфера/куб) и размеры
-            entity_id: model.id_model,
+            entity_id: model.id_model.unwrap_or(0),
             _padding: [0; 2],
         });
 
@@ -412,6 +412,70 @@ impl GpuRenderContext {
             is_mask: false,
         }));
     }
+
+    // pub fn push_voxel_instance(
+    //     &mut self,
+    //     model: &Model,
+    //     rect: &Area,
+    //     level: u32,
+    //     brick_id: u32,
+    //     brick_manager: &mut BrickManager,
+    // ) {
+    //     let first_instance = self.instances_3d.len() as u32;
+
+    //     // Получаем UV координаты блока из менеджера атласа
+    //     let (uv_min, uv_max) = brick_manager.get_uv_range(brick_id);
+
+    //     // Матрица трансформации
+    //     // Важно: SDF воксели работают в локальном кубе 0..16.
+    //     // Нам нужна матрица, которая превращает мир в эти 0..16.
+    //     let inv_transform = model.transform.to_inv_matrix_voxel();
+
+    //     self.instances_3d.push(Instance3DData {
+    //         inv_transform,
+    //         color: color_to_gpu(model.color),
+    //         params: [6.0, brick_id as f32, 0.5, 1.0], // 6.0 - тег вокселя, brick_id, k-сглаживание
+    //         entity_id: model.id_model,
+    //         _padding: [0; 2],
+    //     });
+
+    //     // Вершины квада (используем p_a и p_b для передачи UV атласа)
+    //     let base_vertex = self.shape_vertices.len() as u32;
+    //     let first_index = (base_vertex / 4) * 6;
+
+    //     let corners = [
+    //         [rect.x1, rect.y1],
+    //         [rect.get_x2(), rect.y1],
+    //         [rect.get_x2(), rect.get_y2()],
+    //         [rect.x1, rect.get_y2()],
+    //     ];
+
+    //     for pos in corners {
+    //         self.shape_vertices.push(ShapeVertex {
+    //             position: pos,
+    //             color: 0,
+    //             p_a: uv_min, // ТЕПЕРЬ ЭТО UV СТАРТ БЛОКА В АТЛАСЕ
+    //             p_b: uv_max, // ТЕПЕРЬ ЭТО UV КОНЕЦ БЛОКА В АТЛАСЕ
+    //             params: [0.0, 6.0, 0.0, first_instance as f32], // тип 6.0 и ссылка на данные инстанса
+    //             border_color: 0,
+    //         });
+    //     }
+
+    //     let cmd_idx = self.indirect_cmd.len() as u32;
+    //     self.indirect_cmd.push(DrawIndexedIndirectArgs {
+    //         index_count: 6,
+    //         instance_count: 1,
+    //         first_index,
+    //         base_vertex: 0,
+    //         first_instance: 0, // Мы используем индексацию через params.w в шейдере
+    //     });
+
+    //     self.command_sections.push(GpuCommand::Instance(Section {
+    //         level,
+    //         command_index: cmd_idx,
+    //         is_mask: false,
+    //     }));
+    // }
 }
 
 fn color_to_gpu(color: u32) -> u32 {

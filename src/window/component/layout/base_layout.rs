@@ -1,4 +1,4 @@
-use crate::window::component::base::area::Rect;
+use crate::window::component::base::area::{Area, AreaMath};
 use crate::window::component::interface::const_layout::ConstLayout;
 use crate::window::component::interface::layout::Layout;
 use crate::window::component::layout::const_base_layout::Direction;
@@ -50,7 +50,7 @@ impl Layout for BaseLayout {
     fn set_const_layout(&mut self, const_layout: Option<Box<dyn ConstLayout>>) {
         self.const_layout = const_layout
     }
-    fn calculate(&self, area: &Rect<f32, u16>, parent_area: &Rect<f32, u16>) -> Rect<f32, u16> {
+    fn calculate(&self, area: &Area, parent_area: &Area) -> Area {
         let mut area = area.clone();
 
         match self.align {
@@ -80,7 +80,7 @@ impl Layout for BaseLayout {
         return area;
     }
 
-    fn decrease(&self, area: &Rect<f32, u16>, parent_area: &Rect<f32, u16>) -> Rect<f32, u16> {
+    fn decrease(&self, area: &Area, parent_area: &Area) -> Area {
         let mut area = area.clone();
 
         let x_offset = area.get_x_offset() + self.margin.right as f32;
@@ -105,22 +105,17 @@ impl Layout for BaseLayout {
 
         return area;
     }
-    fn padding_area(&self, area: &Rect<f32, u16>) -> Rect<f32, u16> {
+    fn padding_area(&self, area: &Area) -> Area {
         let x1 = self.padding.left as f32;
         let y1 = self.padding.up as f32;
         let x2 = area.min.get_width() as f32 - self.padding.right as f32;
         let y2 = area.min.get_height() as f32 - self.padding.down as f32;
 
-        Rect::new_from_coord((x1, y1), (x2, y2))
+        Area::new_from_coord((x1, y1), (x2, y2))
     }
-    fn next(
-        &self,
-        _area: &Rect<f32, u16>,
-        parent_area: &Rect<f32, u16>,
-        _margin: Direction,
-    ) -> (Rect<f32, u16>, bool) {
+    fn next(&self, _area: &Area, parent_area: &Area, _margin: Direction) -> (Area, bool) {
         (
-            Rect::new(
+            Area::new(
                 parent_area.x1,
                 parent_area.y1,
                 parent_area.min.get_width(),

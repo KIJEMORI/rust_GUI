@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use crate::window::component::animation::animation_action::AnimationSequence;
-use crate::window::component::base::area::Rect;
+use crate::window::component::base::area::Area;
 use crate::window::component::base::base::Base;
 
 use crate::window::component::base::component_type::SharedDrawable;
@@ -50,9 +50,9 @@ pub trait SelectableDrawable {
 
 pub trait ScrollableDrawable {
     fn is_scrollable(&self) -> bool;
-    fn set_scrolable(&mut self) -> &mut dyn ScrollableDrawable;
-    fn set_offset(&mut self, x: f32, y: f32, area: &Rect<f32, u16>);
-    fn remove_scrolable(&mut self) -> &mut dyn ScrollableDrawable;
+    fn set_on_scroll(&mut self, cmd: UiCommand) -> &mut dyn ScrollableDrawable;
+    fn set_scrolable(&mut self, tumbler: bool) -> &mut dyn ScrollableDrawable;
+    fn set_offset(&mut self, x: f32, y: f32, area: &Area);
     fn scroll(&mut self, x: f32, y: f32) -> bool;
 }
 
@@ -102,18 +102,13 @@ pub trait Drawable: Any {
     fn print(
         &mut self,
         ctx: &mut GpuRenderContext,
-        area: &Rect<f32, u16>,
+        area: &Area,
         level: u32,
         id_parent: u32,
         atlas: &mut AtlasManager,
     );
 
-    fn resize(
-        &mut self,
-        area: &Rect<f32, u16>,
-        ctx: &LayoutContext,
-        auto_size: bool,
-    ) -> Rect<f32, u16>;
+    fn resize(&mut self, area: &Area, ctx: &LayoutContext, auto_size: bool) -> Area;
 
     fn resize_one(&mut self, ctx: &LayoutContext) {}
 
@@ -122,7 +117,7 @@ pub trait Drawable: Any {
 
     fn set_default_settings(&mut self, settings: &Settings) -> &mut dyn Drawable;
 
-    fn hover(&self, mx: u16, my: u16, area: &Rect<f32, u16>) -> bool;
+    fn hover(&self, mx: u16, my: u16, area: &Area) -> bool;
     #[allow(unused_variables)]
     fn get_managers<'a>(
         &'a self,

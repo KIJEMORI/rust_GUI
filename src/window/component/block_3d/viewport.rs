@@ -6,10 +6,13 @@ use crate::{
     window::{
         component::{
             base::{
-                area::Rect, base::Base, component_type::SharedDrawable,
-                gpu_render_context::GpuRenderContext, settings::Settings,
+                area::Area, base::Base, component_type::SharedDrawable,
+                gpu_render_context::GpuRenderContext, settings::Settings, ui_command::CommandTrait,
             },
-            block_3d::{model::model::Model, transform::calculate_model_screen_rect},
+            block_3d::{
+                model::model::Model,
+                transform::{calculate_group_screen_rect, calculate_model_screen_rect},
+            },
             interface::{
                 component_control::{ComponentControl, ComponentControlExt, PanelControl},
                 drawable::{
@@ -36,6 +39,7 @@ pub struct Viewport3D {
     pub models: Vec<Model>,
     pub camera: CameraUniform,
     pub orbit_controller: OrbitCamera,
+    pub scrollable: bool,
 }
 
 impl Viewport3D {
@@ -69,6 +73,7 @@ impl Viewport3D {
             models: Vec::with_capacity(1024),
             camera,
             orbit_controller: orbit,
+            scrollable: false,
         }
     }
 
@@ -89,7 +94,7 @@ impl Drawable for Viewport3D {
     fn print(
         &mut self,
         ctx: &mut GpuRenderContext,
-        area: &Rect<f32, u16>,
+        area: &Area,
         level: u32,
         id_parent: u32,
         atlas: &mut AtlasManager,
@@ -132,6 +137,21 @@ impl Drawable for Viewport3D {
             }
             ctx.camera_data = self.camera;
 
+            let step = 4;
+            for i in (0..self.models.len()).step_by(step / 2) {
+                let models = &self.models[i..(i + step).min(self.models.len())];
+
+                let group_rect = calculate_group_screen_rect(
+                    models,
+                    &self.camera,
+                    [area.max.get_width() as f32, area.max.get_height() as f32],
+                );
+
+                if group_rect.min.get_width() > 0 {
+                    ctx.push_3d_viewport(&group_rect, models, level);
+                }
+            }
+
             // for model in &self.models {
             //     let tight_rect = calculate_model_screen_rect(
             //         model,
@@ -141,30 +161,25 @@ impl Drawable for Viewport3D {
 
             //     ctx.push_3d_viewport(&tight_rect, &[model], level);
             // }
-            for model in &self.models {
-                // Считаем область на экране для конкретного поворота/позиции этой модели
-                let tight_rect = calculate_model_screen_rect(
-                    model,
-                    &self.camera,
-                    [area.max.get_width() as f32, area.max.get_height() as f32],
-                );
+            // for model in &self.models {
+            //     // Считаем область на экране для конкретного поворота/позиции этой модели
+            //     let tight_rect = calculate_model_screen_rect(
+            //         model,
+            //         &self.camera,
+            //         [area.max.get_width() as f32, area.max.get_height() as f32],
+            //     );
 
-                // Если модель попадает в экран — пушим её
-                if tight_rect.min.get_width() > 0 && tight_rect.min.get_height() > 0 {
-                    ctx.push_model_instance(model, &tight_rect, level);
-                }
-            }
+            //     // Если модель попадает в экран — пушим её
+            //     if tight_rect.min.get_width() > 0 && tight_rect.min.get_height() > 0 {
+            //         ctx.push_model_instance(model, &tight_rect, level);
+            //     }
+            // }
 
             ctx.push_rect_sdf(&rect, background_color, border, level, true, true);
         }
     }
 
-    fn resize(
-        &mut self,
-        area: &Rect<f32, u16>,
-        ctx: &LayoutContext,
-        auto_size: bool,
-    ) -> Rect<f32, u16> {
+    fn resize(&mut self, area: &Area, ctx: &LayoutContext, auto_size: bool) -> Area {
         let rect = self.panel.resize(area, ctx, auto_size);
 
         return rect;
@@ -191,7 +206,7 @@ impl Drawable for Viewport3D {
         );
     }
 
-    fn hover(&self, mx: u16, my: u16, area: &Rect<f32, u16>) -> bool {
+    fn hover(&self, mx: u16, my: u16, area: &Area) -> bool {
         self.panel.hover(mx, my, area)
     }
 
@@ -249,10 +264,10 @@ impl Drawable for Viewport3D {
     }
 
     fn as_scrollable(&self) -> Option<&dyn ScrollableDrawable> {
-        self.panel.as_scrollable()
+        Some(self)
     }
     fn as_scrollable_mut(&mut self) -> Option<&mut dyn ScrollableDrawable> {
-        self.panel.as_scrollable_mut()
+        Some(self)
     }
 
     fn as_dragable(&self) -> Option<&dyn DragableDrawable> {
@@ -302,12 +317,50 @@ impl ViewportControl for Viewport3D {
         self.orbit_controller
             .rotate(mx_offset * sensitivity, my_offset * sensitivity);
 
-        let rect = &self.panel.base.rect;
-        let aspect = rect.min.get_width() as f32 / rect.min.get_height() as f32;
+        // let rect = &self.panel.base.rect;
+        // let aspect = rect.min.get_width() as f32 / rect.min.get_height() as f32;
 
-        self.camera = self.orbit_controller.update_uniform(aspect);
+        // self.camera = self.orbit_controller.update_uniform(aspect);
 
         // Не забываем пометить данные для загрузки на GPU
         //self.is_dirty = true;
+    }
+    fn change_distance_camera(&mut self, x_offset: f32, y_offset: f32) {
+        let sensitivity = -0.05;
+
+        self.orbit_controller
+            .change_distance(x_offset, y_offset * sensitivity);
+    }
+}
+
+impl ScrollableDrawable for Viewport3D {
+    fn is_scrollable(&self) -> bool {
+        self.scrollable
+    }
+    fn set_on_scroll(
+        &mut self,
+        cmd: crate::window::component::base::ui_command::UiCommand,
+    ) -> &mut dyn ScrollableDrawable {
+        self.panel.set_on_scroll(cmd)
+    }
+    fn set_scrolable(&mut self, tumbler: bool) -> &mut dyn ScrollableDrawable {
+        self.scrollable = tumbler;
+        self
+    }
+    fn set_offset(&mut self, x: f32, y: f32, area: &Area) {}
+
+    fn scroll(&mut self, x: f32, y: f32) -> bool {
+        if let Some(cmd) = &self.panel.on_scrol {
+            let command_to_send = cmd.clone();
+
+            command_to_send.fill_ref(&self.panel.base.id);
+
+            command_to_send.fill_coord(x, y);
+
+            if let Some(tx) = &self.panel.base.settings.command_tx {
+                let _ = tx.send(command_to_send);
+            }
+        }
+        true
     }
 }

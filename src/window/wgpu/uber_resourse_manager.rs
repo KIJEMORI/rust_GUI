@@ -50,13 +50,17 @@ impl UberResourceManager {
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Static Index Buffer"),
             contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::INDEX
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
         });
 
         let indirect_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Draw Vertex Buffer"),
             size: 5000 * std::mem::size_of::<DrawIndexedIndirectArgs>() as u64,
-            usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::INDIRECT
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
 
@@ -144,13 +148,22 @@ impl UberResourceManager {
             let mut indices = Vec::with_capacity(new_count as usize);
             for i in 0..(new_count / 6) {
                 let b = (i * 4) as u32;
-                indices.extend_from_slice(&[b, b + 1, b + 2, b + 2, b + 1, b + 3]);
+                indices.extend_from_slice(&[
+                    b + 0,
+                    b + 1,
+                    b + 2, // Первый треугольник
+                    b + 2,
+                    b + 3,
+                    b + 0, // Второй треугольник (порядок важен для CW/CCW)
+                ]);
             }
 
             self.index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Uber Index Buffer (Expanded)"),
                 contents: bytemuck::cast_slice(&indices),
-                usage: wgpu::BufferUsages::INDEX,
+                usage: wgpu::BufferUsages::INDEX
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
             });
         }
     }

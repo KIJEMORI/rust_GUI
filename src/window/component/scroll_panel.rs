@@ -7,8 +7,12 @@ use crate::{
     add_drawable_control,
     window::component::{
         base::{
-            area::Rect, base::Base, component_type::SharedDrawable,
-            gpu_render_context::GpuRenderContext, scroll_slider::ScrollSlider, settings::Settings,
+            area::{Area, AreaMath},
+            base::Base,
+            component_type::SharedDrawable,
+            gpu_render_context::GpuRenderContext,
+            scroll_slider::ScrollSlider,
+            settings::Settings,
             ui_command::UiCommand,
         },
         interface::{
@@ -44,7 +48,7 @@ impl Default for ScrollPanel {
     fn default() -> Self {
         let mut panel = Panel::default();
 
-        panel.as_scrollable_mut().unwrap().set_scrolable();
+        panel.as_scrollable_mut().unwrap().set_scrolable(true);
 
         let mut vertical_slider_panel = ScrollSlider::default();
         vertical_slider_panel
@@ -80,7 +84,7 @@ impl Drawable for ScrollPanel {
     fn print(
         &mut self,
         ctx: &mut GpuRenderContext,
-        area: &Rect<f32, u16>,
+        area: &Area,
         level: u32,
         id_parent: u32,
         atlas: &mut AtlasManager,
@@ -156,7 +160,7 @@ impl Drawable for ScrollPanel {
 
                     let slider_y1 = free_space * scroll_progress;
 
-                    let vertical_scroll_rect = Rect::new(
+                    let vertical_scroll_rect = Area::new(
                         slider_x1,
                         slider_y1,
                         self.vertical_width as u16,
@@ -191,7 +195,7 @@ impl Drawable for ScrollPanel {
 
                     let slider_y1 = rect.get_y2() - self.horizontal_height as f32 - rect.y1;
 
-                    let horizontal_scroll_rect = Rect::new(
+                    let horizontal_scroll_rect = Area::new(
                         slider_x1,
                         slider_y1,
                         slider_width as u16,
@@ -212,12 +216,7 @@ impl Drawable for ScrollPanel {
         }
     }
 
-    fn resize(
-        &mut self,
-        area: &Rect<f32, u16>,
-        ctx: &LayoutContext,
-        auto_size: bool,
-    ) -> Rect<f32, u16> {
+    fn resize(&mut self, area: &Area, ctx: &LayoutContext, auto_size: bool) -> Area {
         let rect = self.panel.resize(area, ctx, auto_size);
 
         let id = self.as_base().id;
@@ -272,7 +271,7 @@ impl Drawable for ScrollPanel {
 
                 let slider_y1 = free_space * scroll_progress;
 
-                let vertical_scroll_rect = Rect::new(
+                let vertical_scroll_rect = Area::new(
                     slider_x1,
                     slider_y1,
                     self.vertical_width as u16,
@@ -322,7 +321,7 @@ impl Drawable for ScrollPanel {
 
                 let slider_y1 = rect.get_y2() - self.horizontal_height as f32 - rect.y1;
 
-                let horizontal_scroll_rect = Rect::new(
+                let horizontal_scroll_rect = Area::new(
                     slider_x1,
                     slider_y1,
                     slider_width as u16,
@@ -401,7 +400,7 @@ impl Drawable for ScrollPanel {
         }
     }
 
-    fn hover(&self, mx: u16, my: u16, area: &Rect<f32, u16>) -> bool {
+    fn hover(&self, mx: u16, my: u16, area: &Area) -> bool {
         self.panel.hover(mx, my, area)
     }
 

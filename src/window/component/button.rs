@@ -1,6 +1,6 @@
 use crate::add_drawable_control;
 
-use crate::window::component::base::area::Rect;
+use crate::window::component::base::area::Area;
 use crate::window::component::base::base::Base;
 
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
@@ -34,19 +34,14 @@ impl Drawable for Button {
     fn print(
         &mut self,
         ctx: &mut GpuRenderContext,
-        area: &Rect<f32, u16>,
+        area: &Area,
         level: u32,
         id_parent: u32,
         atlas: &mut AtlasManager,
     ) {
         self.label.print(ctx, area, level, id_parent, atlas);
     }
-    fn resize(
-        &mut self,
-        area: &Rect<f32, u16>,
-        ctx: &LayoutContext,
-        auto_size: bool,
-    ) -> Rect<f32, u16> {
+    fn resize(&mut self, area: &Area, ctx: &LayoutContext, auto_size: bool) -> Area {
         self.label.resize(area, ctx, auto_size)
     }
     fn resize_one(&mut self, ctx: &LayoutContext) {
@@ -63,7 +58,7 @@ impl Drawable for Button {
         self
     }
 
-    fn hover(&self, mx: u16, my: u16, area: &Rect<f32, u16>) -> bool {
+    fn hover(&self, mx: u16, my: u16, area: &Area) -> bool {
         self.label.hover(mx, my, area)
     }
     fn as_panel_control(&self) -> &dyn PanelControl {

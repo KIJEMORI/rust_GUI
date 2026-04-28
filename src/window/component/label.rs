@@ -1,7 +1,7 @@
 use winit::keyboard::SmolStr;
 
 use crate::add_drawable_control;
-use crate::window::component::base::area::Rect;
+use crate::window::component::base::area::{Area, AreaMath};
 use crate::window::component::base::base::Base;
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
 use crate::window::component::base::settings::Settings;
@@ -27,13 +27,13 @@ pub struct Label {
     editable: bool,
     change_cursor: bool,
     cursor_need: bool,
-    cursor: Rect<f32, u16>,
+    cursor: Area,
     cursor_index: u32,
     pub cursor_color: u32,
     select_index_start: u32,
     select_index_end: u32,
     select_color: u32,
-    select_rect: Rect<f32, u16>,
+    select_rect: Area,
 }
 
 impl Label {
@@ -48,13 +48,13 @@ impl Label {
             editable: false,
             change_cursor: false,
             cursor_need: false,
-            cursor: Rect::default(),
+            cursor: Area::default(),
             cursor_index: 0,
             cursor_color: 0xFFFFFF00,
             select_index_start: 0,
             select_index_end: 0,
             select_color: 0xAAFFFFFF,
-            select_rect: Rect::default(),
+            select_rect: Area::default(),
         }
     }
 
@@ -145,7 +145,7 @@ impl LabelControl for Label {
     fn remove_select(&mut self) {
         self.select_index_start = 0;
         self.select_index_end = 0;
-        self.select_rect = Rect::default();
+        self.select_rect = Area::default();
 
         if let Some(tx) = &self.panel.base.settings.command_tx {
             let _ = tx.send(UiCommand::RequestRedraw());
@@ -289,7 +289,7 @@ impl Drawable for Label {
     fn print(
         &mut self,
         ctx: &mut GpuRenderContext,
-        area: &Rect<f32, u16>,
+        area: &Area,
         level: u32,
         id_parent: u32,
         atlas: &mut AtlasManager,
@@ -417,7 +417,7 @@ impl Drawable for Label {
             let first_point = ((rect.x1 as f32 + x1_offset.min(x2_offset)), rect.y1);
             let second_point = ((rect.x1 as f32 + x1_offset.max(x2_offset)), rect.get_y2());
 
-            self.select_rect = Rect::new_from_coord(first_point, second_point);
+            self.select_rect = Area::new_from_coord(first_point, second_point);
         }
 
         let x_offset = x_cursor;
@@ -444,15 +444,10 @@ impl Drawable for Label {
             x_pos += scroll.offset.0
         }
 
-        self.cursor = Rect::new_from_coord((x_pos, rect.y1), (x_pos + 1.0, rect.get_y2()));
+        self.cursor = Area::new_from_coord((x_pos, rect.y1), (x_pos + 1.0, rect.get_y2()));
     }
 
-    fn resize(
-        &mut self,
-        area: &Rect<f32, u16>,
-        ctx: &LayoutContext,
-        auto_size: bool,
-    ) -> Rect<f32, u16> {
+    fn resize(&mut self, area: &Area, ctx: &LayoutContext, auto_size: bool) -> Area {
         if self.needs_layout {
             self.set_max_size(ctx);
 
@@ -519,7 +514,7 @@ impl Drawable for Label {
             let first_point = ((rect.x1 as f32 + x1_offset.min(x2_offset)), rect.y1);
             let second_point = ((rect.x1 as f32 + x1_offset.max(x2_offset)), rect.get_y2());
 
-            self.select_rect = Rect::new_from_coord(first_point, second_point);
+            self.select_rect = Area::new_from_coord(first_point, second_point);
         }
 
         let x_offset = x_cursor;
@@ -546,12 +541,12 @@ impl Drawable for Label {
             x_pos += scroll.offset.0
         }
 
-        self.cursor = Rect::new_from_coord((x_pos, rect.y1), (x_pos + 1.0, rect.get_y2()));
+        self.cursor = Area::new_from_coord((x_pos, rect.y1), (x_pos + 1.0, rect.get_y2()));
 
         self.panel.base.rect.clone()
     }
 
-    fn hover(&self, mx: u16, my: u16, area: &Rect<f32, u16>) -> bool {
+    fn hover(&self, mx: u16, my: u16, area: &Area) -> bool {
         self.panel.hover(mx, my, area)
     }
 

@@ -1,20 +1,15 @@
 use crate::window::component::{
-    base::area::Rect,
+    base::area::Area,
     interface::const_layout::ConstLayout,
     layout::{base_layout::Align, const_base_layout::Direction},
 };
 
 #[allow(dead_code)]
 pub trait Layout {
-    fn calculate(&self, area: &Rect<f32, u16>, parent_area: &Rect<f32, u16>) -> Rect<f32, u16>;
-    fn padding_area(&self, area: &Rect<f32, u16>) -> Rect<f32, u16>;
-    fn next(
-        &self,
-        area: &Rect<f32, u16>,
-        parent_area: &Rect<f32, u16>,
-        margin: Direction,
-    ) -> (Rect<f32, u16>, bool);
-    fn decrease(&self, area: &Rect<f32, u16>, parent_area: &Rect<f32, u16>) -> Rect<f32, u16>;
+    fn calculate(&self, area: &Area, parent_area: &Area) -> Area;
+    fn padding_area(&self, area: &Area) -> Area;
+    fn next(&self, area: &Area, parent_area: &Area, margin: Direction) -> (Area, bool);
+    fn decrease(&self, area: &Area, parent_area: &Area) -> Area;
     fn set_padding(&mut self, direction: Direction);
     fn set_margin(&mut self, direction: Direction);
     fn get_padding(&self) -> &Direction;

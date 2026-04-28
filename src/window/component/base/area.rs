@@ -63,6 +63,17 @@ where
     }
 }
 
+pub trait AreaMath<T, W> {
+    fn get_x_offset(&self) -> T;
+    fn get_x2(&self) -> T;
+    fn get_y_offset(&self) -> T;
+    fn get_y2(&self) -> T;
+    fn change_width_on_coord(&mut self, x2: T);
+    fn change_height_on_coord(&mut self, y2: T);
+    fn contains(&self, x: T, y: T) -> bool;
+    fn intersection(&self, other: &Self) -> bool;
+}
+
 impl<T, W> Rect<T, W>
 where
     T: Copy + Add<T, Output = T> + Sub<T, Output = T> + TypeToType<W> + PartialOrd + Default,
@@ -85,21 +96,6 @@ where
             min: min,
             max: max,
         }
-    }
-
-    pub fn get_x_offset(&self) -> T {
-        return self.x1 + self.max.get_width().into();
-    }
-
-    pub fn get_x2(&self) -> T {
-        return self.x1 + self.min.get_width().into();
-    }
-
-    pub fn get_y_offset(&self) -> T {
-        return self.y1 + self.max.get_height().into();
-    }
-    pub fn get_y2(&self) -> T {
-        return self.y1 + self.min.get_height().into();
     }
 
     pub fn new_from_coord(first_point: (T, T), second_point: (T, T)) -> Self {
@@ -146,14 +142,6 @@ where
         self.min.width = w
     }
 
-    pub fn change_width_on_coord(&mut self, x2: T) {
-        if x2 > self.x1 {
-            self.min.set_width((x2 - self.x1).cast());
-        } else {
-            self.min.set_width(W::default());
-        }
-    }
-
     pub fn set_height(&mut self, h: W) {
         self.max.height = h;
         self.min.height = h;
@@ -162,25 +150,52 @@ where
     pub fn change_height(&mut self, h: W) {
         self.min.height = h
     }
+}
 
-    pub fn change_height_on_coord(&mut self, y2: T) {
-        if y2 > self.y1 {
-            self.min.set_height((y2 - self.y1).cast());
+pub type Area = Rect<f32, u16>;
+
+impl AreaMath<f32, u16> for Area {
+    fn get_x_offset(&self) -> f32 {
+        return self.x1 + self.max.get_width() as f32;
+    }
+
+    fn get_x2(&self) -> f32 {
+        return self.x1 + self.min.get_width() as f32;
+    }
+
+    fn get_y_offset(&self) -> f32 {
+        return self.y1 + self.max.get_height() as f32;
+    }
+    fn get_y2(&self) -> f32 {
+        return self.y1 + self.min.get_height() as f32;
+    }
+
+    fn change_width_on_coord(&mut self, x2: f32) {
+        if x2 > self.x1 {
+            self.min.set_width((x2 - self.x1) as u16);
         } else {
-            self.min.set_height(W::default());
+            self.min.set_width(u16::default());
         }
     }
-    pub fn contains(&self, x: T, y: T) -> bool {
+
+    fn change_height_on_coord(&mut self, y2: f32) {
+        if y2 > self.y1 {
+            self.min.set_height((y2 - self.y1) as u16);
+        } else {
+            self.min.set_height(u16::default());
+        }
+    }
+    fn contains(&self, x: f32, y: f32) -> bool {
         if x >= self.x1
-            && x <= self.x1 + self.min.get_width().into()
+            && x <= self.x1 + self.min.get_width() as f32
             && y >= self.y1
-            && y <= self.y1 + self.min.get_height().into()
+            && y <= self.y1 + self.min.get_height() as f32
         {
             return true;
         }
         return false;
     }
-    pub fn intersection(&self, other: &Self) -> bool {
+    fn intersection(&self, other: &Self) -> bool {
         let x1 = if self.x1 > other.x1 {
             self.x1
         } else {
@@ -191,18 +206,19 @@ where
         } else {
             other.y1
         };
-        let x2 = if self.x1 + self.min.get_width().into() < other.x1 + other.min.get_width().into()
-        {
-            self.x1 + self.min.get_width().into()
-        } else {
-            other.x1 + other.min.get_width().into()
-        };
-        let y2 =
-            if self.y1 + self.min.get_height().into() < other.y1 + other.min.get_height().into() {
-                self.y1 + self.min.get_height().into()
+        let x2 =
+            if self.x1 + (self.min.get_width() as f32) < other.x1 + other.min.get_width() as f32 {
+                self.x1 + self.min.get_width() as f32
             } else {
-                other.y1 + other.min.get_height().into()
+                other.x1 + other.min.get_width() as f32
             };
+        let y2 = if self.y1 + (self.min.get_height() as f32)
+            < other.y1 + other.min.get_height() as f32
+        {
+            self.y1 + self.min.get_height() as f32
+        } else {
+            other.y1 + other.min.get_height() as f32
+        };
 
         // Если прямоугольники не пересекаются
         if x2 <= x1 || y2 <= y1 {

@@ -14,7 +14,7 @@ impl Tor {
         };
         Model {
             is_dirty: true,
-            id_model: 0,
+            id_model: None,
             transform: transform,
             params: [SHAPE_TORUS, size1, size2, 0.0],
             color: 0xFFFF0000,

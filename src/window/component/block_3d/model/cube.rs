@@ -14,7 +14,7 @@ impl Cube {
         };
         Model {
             is_dirty: true,
-            id_model: 0,
+            id_model: None,
             transform: transform,
             params: [SHAPE_BOX, size, 0.0, 0.0],
             color: 0xFFFF0000,

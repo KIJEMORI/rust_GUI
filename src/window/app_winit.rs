@@ -1,4 +1,4 @@
-use crate::window::component::base::area::Rect;
+use crate::window::component::base::area::Area;
 use crate::window::component::base::component_type::SharedDrawable;
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
 use crate::window::component::base::settings::Settings;
@@ -109,7 +109,7 @@ impl AppWinit {
             };
 
             self.panel.borrow_mut().resize(
-                &Rect::new(0.0, 0.0, width, height),
+                &Area::new(0.0, 0.0, width, height),
                 &layout_context,
                 false,
             );

@@ -128,7 +128,7 @@ fn scene_sdf(world_p: vec3<f32>, start_idx: u32, count: u32) -> f32 {
 }
 
 fn get_normal(p: vec3<f32>, start_idx: u32, count: u32) -> vec3<f32> {
-    let e = 0.01; // Подбери значение от 0.01 до 0.05
+    let e = 0.001; // Подбери значение от 0.01 до 0.05
     let dx = vec3<f32>(e, 0.0, 0.0);
     let dy = vec3<f32>(0.0, e, 0.0);
     let dz = vec3<f32>(0.0, 0.0, e);
@@ -148,13 +148,11 @@ struct FragmentOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> FragmentOutput {
-
     // var exmpl: FragmentOutput;
     // exmpl.color = vec4<f32>(0.0, 1.0, 0.0, 1.0);
     // exmpl.depth = 1.0;
     // return exmpl;
 
-    // Обрезка по границам панели (Clip Rect)
     if in.canvas_pos.x < in.viewport_rect.x || in.canvas_pos.y < in.viewport_rect.y ||
         in.canvas_pos.x > in.viewport_rect.z || in.canvas_pos.y > in.viewport_rect.w {
         discard;
@@ -167,37 +165,44 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
     var total_rgb = vec3<f32>(0.0);
     var total_alpha = 0.0;
     var final_p = vec3<f32>(0.0);
+    var hit_anything = false;
 
-    let rect_min = in.viewport_rect.xy;
-    let rect_max = in.viewport_rect.zw;
-    let rect_size = rect_max - rect_min;
+    // Устанавливаем количество сэмплов (1 для производительности)
+    let samples = 1;
+    let f_samples = f32(samples * samples);
 
-    let rect_center = rect_min + rect_size * 0.5;
-
-    let samples = 1; // 2 = SSAA 2x2
     for (var i = 0; i < samples; i++) {
         for (var j = 0; j < samples; j++) {
             let offset = (vec2<f32>(f32(i), f32(j)) - 0.5) / 2.0;
-            let local_pixel = (in.canvas_pos + offset - rect_center);
 
-            let ndc = ((in.canvas_pos + offset) / screen.size.x) * 2.0 - 1.0;
-
+            // Используем только правильный global_ndc
             let global_ndc = ((in.canvas_pos + offset) / screen.size) * 2.0 - 1.0;
             let ray_ndc = vec2<f32>(global_ndc.x, -global_ndc.y);
 
             let target_near = camera.inv_view_proj * vec4<f32>(ray_ndc, 0.0, 1.0);
             let target_far = camera.inv_view_proj * vec4<f32>(ray_ndc, 1.0, 1.0);
+
+            let world_near = target_near.xyz / target_near.w;
+            let world_far = target_far.xyz / target_far.w;
+
             let ray_origin = camera.camera_pos;
-            let ray_dir = normalize(target_far.xyz / target_far.w - target_near.xyz / target_near.w);
+            let ray_dir = normalize(world_far - world_near);
 
             var t = 0.0;
             var hit = false;
             var p = ray_origin;
 
-            for (var step = 0; step < 80; step++) {
+            for (var step = 0; step < 64; step++) {
                 p = ray_origin + ray_dir * t;
                 let d = scene_sdf(p, first_inst_idx, group_count);
-                if d < 0.001 { hit = true; break; }
+
+                let prec = 0.001 * (1.0 + t * 0.01);
+
+                if d < prec {
+                    hit = true;
+                    break;
+                }
+
                 t += d;
                 if t > 1000.0 { break; }
             }
@@ -214,15 +219,16 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
                 total_rgb += (base_color.rgb * diff) + vec3<f32>(spec * 0.5);
                 total_alpha += 1.0;
                 final_p = p;
+                hit_anything = true;
             }
         }
     }
 
-    let final_alpha = total_alpha;
-    if final_alpha <= 0.0 { discard; }
+    if !hit_anything { discard; }
 
     var out: FragmentOutput;
-    out.color = vec4<f32>(total_rgb / 4.0, base_color.a * final_alpha);
+
+    out.color = vec4<f32>(total_rgb / f_samples, base_color.a * (total_alpha / f_samples));
 
     let clip_pos = camera.view_proj * vec4<f32>(final_p, 1.0);
     out.depth = clip_pos.z / clip_pos.w;
