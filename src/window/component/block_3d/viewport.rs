@@ -9,10 +9,7 @@ use crate::{
                 area::Area, base::Base, component_type::SharedDrawable,
                 gpu_render_context::GpuRenderContext, settings::Settings, ui_command::CommandTrait,
             },
-            block_3d::{
-                model::model::Model,
-                transform::{calculate_group_screen_rect, calculate_model_screen_rect},
-            },
+            block_3d::model::{model::Model, sdf_command::SDFCommandExt},
             interface::{
                 component_control::{ComponentControl, ComponentControlExt, PanelControl},
                 drawable::{
@@ -36,7 +33,7 @@ use crate::{
 
 pub struct Viewport3D {
     pub panel: Panel,
-    pub models: Vec<Model>,
+    pub model: Model,
     pub camera: CameraUniform,
     pub orbit_controller: OrbitCamera,
     pub scrollable: bool,
@@ -64,21 +61,21 @@ impl Viewport3D {
         let orbit = OrbitCamera {
             target,
             distance: 10.0,
-            yaw: 0.0,
+            yaw: 3.14159,
             pitch: 0.0,
         };
 
         Viewport3D {
             panel: Panel::default(),
-            models: Vec::with_capacity(1024),
+            model: Model::default(),
             camera,
             orbit_controller: orbit,
             scrollable: false,
         }
     }
 
-    pub fn add_model(&mut self, model: Model) {
-        self.models.push(model);
+    pub fn add_model(&mut self, model: SDFCommandExt) {
+        self.model.push(model);
     }
 
     fn update_camera(&mut self, width: f32, height: f32) {
@@ -137,33 +134,24 @@ impl Drawable for Viewport3D {
             }
             ctx.camera_data = self.camera;
 
-            let step = 4;
-            for i in (0..self.models.len()).step_by(step / 2) {
-                let models = &self.models[i..(i + step).min(self.models.len())];
+            // let step = 4;
+            // for i in (0..self.models.len()).step_by(step / 2) {
+            //     let models = &self.models[i..(i + step).min(self.models.len())];
 
-                let group_rect = calculate_group_screen_rect(
-                    models,
-                    &self.camera,
-                    [area.max.get_width() as f32, area.max.get_height() as f32],
-                );
-
-                if group_rect.min.get_width() > 0 {
-                    ctx.push_3d_viewport(&group_rect, models, level);
-                }
-            }
-
-            // for model in &self.models {
-            //     let tight_rect = calculate_model_screen_rect(
-            //         model,
+            //     let group_rect = calculate_group_screen_rect(
+            //         models,
             //         &self.camera,
             //         [area.max.get_width() as f32, area.max.get_height() as f32],
             //     );
 
-            //     ctx.push_3d_viewport(&tight_rect, &[model], level);
+            //     if group_rect.min.get_width() > 0 {
+            //         ctx.push_3d_viewport(&group_rect, models, level);
+            //     }
             // }
+
             // for model in &self.models {
             //     // Считаем область на экране для конкретного поворота/позиции этой модели
-            //     let tight_rect = calculate_model_screen_rect(
+            //     let tight_rect = calculate_sdf_command_screen_rect(
             //         model,
             //         &self.camera,
             //         [area.max.get_width() as f32, area.max.get_height() as f32],
@@ -174,6 +162,8 @@ impl Drawable for Viewport3D {
             //         ctx.push_model_instance(model, &tight_rect, level);
             //     }
             // }
+
+            ctx.push_bake_commands(&rect, &mut self.model, level);
 
             ctx.push_rect_sdf(&rect, background_color, border, level, true, true);
         }

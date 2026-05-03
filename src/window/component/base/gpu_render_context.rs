@@ -7,7 +7,8 @@ use crate::window::component::base::area::{Area, AreaMath};
 #[cfg(feature = "3d_render")]
 use crate::window::component::block_3d::model::model::Model;
 
-use crate::window::component::managers::brick_3d_manager::BrickManager;
+#[cfg(feature = "3d_render")]
+use crate::window::wgpu::block_3d::brick_uniform::BakePushConstants;
 #[cfg(feature = "3d_render")]
 use crate::window::wgpu::block_3d::{camera_uniform::CameraUniform, instance::Instance3DData};
 
@@ -21,10 +22,9 @@ use crate::window::{
 
 pub struct GpuRenderContext {
     pub shape_vertices: Vec<ShapeVertex>,
-    pub shape_indices: Vec<u32>,
-    pub shape_section_offsets: Vec<Range<usize>>,
     pub command_sections: Vec<GpuCommand>,
-    pub last_index: u32,
+    #[cfg(feature = "3d_render")]
+    pub bake_cmds: Vec<BakePushConstants>,
     #[cfg(feature = "3d_render")]
     pub instances_3d: Vec<Instance3DData>,
     #[cfg(feature = "3d_render")]
@@ -50,14 +50,13 @@ impl GpuRenderContext {
     pub fn new() -> Self {
         GpuRenderContext {
             shape_vertices: Vec::with_capacity(1024),
-            shape_section_offsets: Vec::with_capacity(1024),
-            shape_indices: Vec::with_capacity(1024),
             command_sections: Vec::with_capacity(1024),
-            last_index: 0,
-            #[cfg(feature = "3d_render")]
-            camera_data: CameraUniform::default(),
 
             indirect_cmd: Vec::with_capacity(1024),
+            #[cfg(feature = "3d_render")]
+            camera_data: CameraUniform::default(),
+            #[cfg(feature = "3d_render")]
+            bake_cmds: Vec::with_capacity(1024),
             #[cfg(feature = "3d_render")]
             instances_3d: Vec::with_capacity(1024),
         }
@@ -276,34 +275,134 @@ impl GpuRenderContext {
 
     pub fn clear(&mut self) {
         self.shape_vertices.clear();
-        self.shape_indices.clear();
-        self.shape_section_offsets.clear();
         self.command_sections.clear();
         #[cfg(feature = "3d_render")]
+        self.bake_cmds.clear();
+        #[cfg(feature = "3d_render")]
         self.instances_3d.clear();
-        self.last_index = 0;
         self.indirect_cmd.clear();
     }
 
-    #[cfg(feature = "3d_render")]
-    pub fn push_3d_viewport(&mut self, rect: &Area, models: &[Model], level: u32) {
-        // Запоминаем индекс первого инстанса для этой группы моделей
-        let first_instance = self.instances_3d.len() as u32;
+    // #[cfg(feature = "3d_render")]
+    // pub fn push_3d_viewport(&mut self, rect: &Area, models: &[Model], level: u32) {
+    //     // Запоминаем индекс первого инстанса для этой группы моделей
+    //     let first_instance = self.instances_3d.len() as u32;
 
+    //     // Наполняем буфер данных моделей (инстансов)
+    //     for (indx, model) in models.iter().enumerate() {
+    //         let mut params = model.params;
+    //         if indx == 0 {
+    //             params[3] = models.len() as f32; // Передаем кол-во моделей в первом инстансе
+    //         }
+    //         self.instances_3d.push(Instance3DData {
+    //             inv_transform: model.transform.to_inv_matrix(),
+    //             color: color_to_gpu(model.color),
+    //             params,
+    //             entity_id: model.id_model.unwrap_or(0),
+    //             _padding: [0; 2],
+    //         });
+    //     }
+
+    //     let base_vertex = self.shape_vertices.len() as u32;
+    //     let first_index = (base_vertex / 4) * 6;
+
+    //     // TL, TR, BR, BL — используем тот же порядок, что в push_shape
+    //     let corners = [
+    //         [rect.x1, rect.y1],
+    //         [rect.get_x2(), rect.y1],
+    //         [rect.get_x2(), rect.get_y2()],
+    //         [rect.x1, rect.get_y2()],
+    //     ];
+
+    //     for pos in corners {
+    //         self.shape_vertices.push(ShapeVertex {
+    //             position: pos,
+    //             color: 0,
+    //             p_a: [rect.x1, rect.y1], // Можно использовать как координаты клиппинга
+    //             p_b: [rect.get_x2(), rect.get_y2()],
+    //             params: [first_instance as f32, 0.0, 0.0, 0.0],
+    //             border_color: 0,
+    //         });
+    //     }
+
+    //     // Добавляем команду в ЕДИНЫЙ indirect_cmd буфер
+    //     let cmd_idx = self.indirect_cmd.len() as u32;
+    //     self.indirect_cmd.push(DrawIndexedIndirectArgs {
+    //         index_count: 6,
+    //         instance_count: models.len() as u32,
+    //         first_index,
+    //         base_vertex: 0,
+    //         first_instance,
+    //     });
+
+    //     self.command_sections.push(GpuCommand::Instance(Section {
+    //         level,
+    //         command_index: cmd_idx,
+    //         is_mask: false,
+    //     }));
+    // }
+
+    // #[cfg(feature = "3d_render")]
+    // pub fn push_model_instance(&mut self, model: &Model, rect: &Area, level: u32) {
+    //     // Запоминаем текущий индекс в буфере инстансов
+    //     let first_instance = self.instances_3d.len() as u32;
+
+    //     let mut params = model.params;
+    //     params[3] = 1.0;
+    //     // Пушим данные трансформации (поворот, позиция, масштаб)
+    //     self.instances_3d.push(Instance3DData {
+    //         inv_transform: model.transform.to_inv_matrix(),
+    //         color: color_to_gpu(model.color),
+    //         params: params, // Здесь лежит tag (сфера/куб) и размеры
+    //         entity_id: model.id_model.unwrap_or(0),
+    //         _padding: [0; 2],
+    //     });
+
+    //     // Подготавливаем вершины "тесного" квада
+    //     let base_vertex = self.shape_vertices.len() as u32;
+    //     let first_index = (base_vertex / 4) * 6;
+
+    //     let corners = [
+    //         [rect.x1, rect.y1],
+    //         [rect.get_x2(), rect.y1],
+    //         [rect.get_x2(), rect.get_y2()],
+    //         [rect.x1, rect.get_y2()],
+    //     ];
+
+    //     for pos in corners {
+    //         self.shape_vertices.push(ShapeVertex {
+    //             position: pos,
+    //             color: 0,
+    //             p_a: [rect.x1, rect.y1], // Viewport Min для шейдера
+    //             p_b: [rect.get_x2(), rect.get_y2()],
+    //             params: [first_instance as f32, 0.0, 0.0, 0.0], // Тип 3.0
+    //             border_color: 0,
+    //         });
+    //     }
+
+    //     // Команда отрисовки: 1 инстанс, но со смещением first_instance
+    //     let cmd_idx = self.indirect_cmd.len() as u32;
+    //     self.indirect_cmd.push(DrawIndexedIndirectArgs {
+    //         index_count: 6,
+    //         instance_count: 1,
+    //         first_index,
+    //         base_vertex: 0,
+    //         first_instance: first_instance, // <--- Указываем на данные в Storage Buffer
+    //     });
+
+    //     self.command_sections.push(GpuCommand::Instance(Section {
+    //         level,
+    //         command_index: cmd_idx,
+    //         is_mask: false,
+    //     }));
+    // }
+
+    #[cfg(feature = "3d_render")]
+    pub fn push_bake_commands(&mut self, rect: &Area, model: &mut Model, level: u32) {
         // Наполняем буфер данных моделей (инстансов)
-        for (indx, model) in models.iter().enumerate() {
-            let mut params = model.params;
-            if indx == 0 {
-                params[3] = models.len() as f32; // Передаем кол-во моделей в первом инстансе
-            }
-            self.instances_3d.push(Instance3DData {
-                inv_transform: model.transform.to_inv_matrix(),
-                color: color_to_gpu(model.color),
-                params,
-                entity_id: model.id_model.unwrap_or(0),
-                _padding: [0; 2],
-            });
-        }
+        let (bake_cmds, instance_cmds) = model.render();
+        self.bake_cmds = bake_cmds;
+        self.instances_3d = instance_cmds;
 
         let base_vertex = self.shape_vertices.len() as u32;
         let first_index = (base_vertex / 4) * 6;
@@ -320,9 +419,9 @@ impl GpuRenderContext {
             self.shape_vertices.push(ShapeVertex {
                 position: pos,
                 color: 0,
-                p_a: [rect.x1, rect.y1], // Можно использовать как координаты клиппинга
+                p_a: [rect.x1, rect.y1],
                 p_b: [rect.get_x2(), rect.get_y2()],
-                params: [0.0, 1.0, 0.0, 0.0], // Тип 3.0 — 3D Viewport для шейдера (если нужно)
+                params: [0.0, 0.0, 0.0, 0.0],
                 border_color: 0,
             });
         }
@@ -331,79 +430,10 @@ impl GpuRenderContext {
         let cmd_idx = self.indirect_cmd.len() as u32;
         self.indirect_cmd.push(DrawIndexedIndirectArgs {
             index_count: 6,
-            instance_count: models.len() as u32,
-            first_index,
-            base_vertex: 0,
-            first_instance,
-        });
-
-        self.command_sections.push(GpuCommand::Instance(Section {
-            level,
-            command_index: cmd_idx,
-            is_mask: false,
-        }));
-    }
-
-    #[cfg(feature = "3d_render")]
-    pub fn update_camera(&mut self, eye: Vec3, target: Vec3, up: Vec3, aspect: f32) {
-        let view = Mat4::look_at_rh(eye, target, up);
-        let proj = Mat4::perspective_rh(45.0f32.to_radians(), aspect, 0.1, 100.0);
-        let view_proj = proj * view;
-
-        self.camera_data = CameraUniform {
-            view_proj: view_proj,
-            inv_view_proj: view_proj.inverse(),
-            camera_pos: eye.to_array(),
-            _padding: 0.0,
-        };
-    }
-
-    #[cfg(feature = "3d_render")]
-    pub fn push_model_instance(&mut self, model: &Model, rect: &Area, level: u32) {
-        // Запоминаем текущий индекс в буфере инстансов
-        let first_instance = self.instances_3d.len() as u32;
-
-        let mut params = model.params;
-        params[3] = 1.0;
-        // Пушим данные трансформации (поворот, позиция, масштаб)
-        self.instances_3d.push(Instance3DData {
-            inv_transform: model.transform.to_inv_matrix(),
-            color: color_to_gpu(model.color),
-            params: params, // Здесь лежит tag (сфера/куб) и размеры
-            entity_id: model.id_model.unwrap_or(0),
-            _padding: [0; 2],
-        });
-
-        // Подготавливаем вершины "тесного" квада
-        let base_vertex = self.shape_vertices.len() as u32;
-        let first_index = (base_vertex / 4) * 6;
-
-        let corners = [
-            [rect.x1, rect.y1],
-            [rect.get_x2(), rect.y1],
-            [rect.get_x2(), rect.get_y2()],
-            [rect.x1, rect.get_y2()],
-        ];
-
-        for pos in corners {
-            self.shape_vertices.push(ShapeVertex {
-                position: pos,
-                color: 0,
-                p_a: [rect.x1, rect.y1], // Viewport Min для шейдера
-                p_b: [rect.get_x2(), rect.get_y2()],
-                params: [0.0, 1.0, 0.0, 0.0], // Тип 3.0
-                border_color: 0,
-            });
-        }
-
-        // Команда отрисовки: 1 инстанс, но со смещением first_instance
-        let cmd_idx = self.indirect_cmd.len() as u32;
-        self.indirect_cmd.push(DrawIndexedIndirectArgs {
-            index_count: 6,
             instance_count: 1,
             first_index,
             base_vertex: 0,
-            first_instance: first_instance, // <--- Указываем на данные в Storage Buffer
+            first_instance: 0,
         });
 
         self.command_sections.push(GpuCommand::Instance(Section {
@@ -478,7 +508,7 @@ impl GpuRenderContext {
     // }
 }
 
-fn color_to_gpu(color: u32) -> u32 {
+pub fn color_to_gpu(color: u32) -> u32 {
     let a = (color >> 24) & 0xFF;
     let r = (color >> 16) & 0xFF;
     let g = (color >> 8) & 0xFF;

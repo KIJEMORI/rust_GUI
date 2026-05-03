@@ -1,5 +1,6 @@
 use glam::{EulerRot, Mat4, Quat, Vec3, Vec4Swizzles};
 
+#[derive(Copy, Clone)]
 pub struct Transform {
     pub position: Vec3,
     pub rotation: Vec3, // Pitch, Yaw, Roll в радианах
@@ -7,6 +8,19 @@ pub struct Transform {
 }
 
 impl Transform {
+    pub fn to_matrix(&self) -> Mat4 {
+        Mat4::from_scale_rotation_translation(
+            self.scale,
+            Quat::from_euler(
+                EulerRot::XYZ,
+                self.rotation.x,
+                self.rotation.y,
+                self.rotation.z,
+            ),
+            self.position,
+        )
+    }
+
     pub fn to_inv_matrix(&self) -> Mat4 {
         let matrix = Mat4::from_scale_rotation_translation(
             self.scale,
@@ -48,12 +62,13 @@ impl Transform {
 use crate::window::component::base::area::Area;
 use crate::window::component::block_3d::model::model::SHAPE_BOX;
 use crate::window::component::block_3d::model::model::{
-    Model, SHAPE_CAPSULE, SHAPE_CILINDER, SHAPE_TORUS,
+    SHAPE_CAPSULE, SHAPE_CILINDER, SHAPE_TORUS,
 };
+use crate::window::component::block_3d::model::sdf_command::SDFCommandExt;
 use crate::window::wgpu::block_3d::camera_uniform::CameraUniform;
 
-pub fn calculate_model_screen_rect(
-    model: &Model,
+pub fn calculate_sdf_command_screen_rect(
+    sdf_cmd: &SDFCommandExt,
     camera: &CameraUniform,
     screen_size: [f32; 2],
 ) -> Area {
@@ -61,9 +76,9 @@ pub fn calculate_model_screen_rect(
     let [width, height] = screen_size;
 
     // Определяем "эффективный" радиус для охвата фигуры
-    let tag = model.params[0];
-    let size = model.params[1];
-    let extra = model.params[2];
+    let tag = sdf_cmd.params[0];
+    let size = sdf_cmd.params[1];
+    let extra = sdf_cmd.params[2];
 
     let r = if tag == SHAPE_BOX {
         // Для куба радиус описанной сферы — это корень из суммы квадратов сторон
@@ -81,9 +96,9 @@ pub fn calculate_model_screen_rect(
 
     // Добавляем 10% запаса на сглаживание (AA)
     let r = r * 1.5;
-    let center = model.transform.position; // Предполагаем, что в Transform есть position: Vec3
+    let center = sdf_cmd.transform.position; // Предполагаем, что в Transform есть position: Vec3
 
-    // 2. Проецируем 8 точек AABB
+    // Проецируем 8 точек AABB
     let mut min_x = f32::MAX;
     let mut max_x = f32::MIN;
     let mut min_y = f32::MAX;
@@ -125,7 +140,7 @@ pub fn calculate_model_screen_rect(
 }
 
 pub fn calculate_group_screen_rect(
-    models: &[Model],
+    sdf_cmds: &[SDFCommandExt],
     camera: &CameraUniform,
     screen_size: [f32; 2],
 ) -> Area {
@@ -138,11 +153,11 @@ pub fn calculate_group_screen_rect(
     let mut max_y = f32::MIN;
     let mut any_visible = false;
 
-    for model in models {
+    for sdf_cmd in sdf_cmds {
         // Определяем радиус охвата конкретной модели
-        let tag = model.params[0];
-        let size = model.params[1];
-        let extra = model.params[2];
+        let tag = sdf_cmd.params[0];
+        let size = sdf_cmd.params[1];
+        let extra = sdf_cmd.params[2];
 
         let r = match tag {
             SHAPE_BOX => (Vec3::new(size, size, size)).length(),
@@ -151,7 +166,7 @@ pub fn calculate_group_screen_rect(
             _ => size,
         } * 1.5; // Твой запас на сглаживание
 
-        let center = model.transform.position;
+        let center = sdf_cmd.transform.position;
 
         // Проецируем 8 углов описанного куба модели
         for i in 0..8 {

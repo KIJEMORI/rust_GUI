@@ -1,11 +1,14 @@
-use crate::window::component::block_3d::transform::Transform;
+use crate::window::{
+    component::{
+        block_3d::model::sdf_command::SDFCommandExt, managers::brick_3d_manager::BrickManager,
+    },
+    wgpu::block_3d::{brick_uniform::BakePushConstants, instance::Instance3DData},
+};
 
 pub struct Model {
-    pub is_dirty: bool,
-    pub id_model: Option<u32>,
-    pub transform: Transform,
-    pub params: [f32; 4],
-    pub color: u32,
+    sdf_cmds: Vec<SDFCommandExt>,
+    history_sdf_cmds: Vec<SDFCommandExt>,
+    brick_manager: BrickManager,
 }
 
 pub const SHAPE_SPHERE: f32 = 1.0;
@@ -14,28 +17,29 @@ pub const SHAPE_TORUS: f32 = 3.0;
 pub const SHAPE_CILINDER: f32 = 4.0;
 pub const SHAPE_CAPSULE: f32 = 5.0;
 
-pub trait ModelTrait {
-    fn get_transform(&self) -> &Transform;
-    fn get_id(&self) -> Option<u32>;
-    fn is_dirty(&self) -> bool;
-    fn set_dirty(&mut self, tumbler: bool);
-    fn get_params(&self) -> [f32; 4];
+impl Default for Model {
+    fn default() -> Self {
+        Model::new()
+    }
 }
 
-impl ModelTrait for Model {
-    fn get_transform(&self) -> &Transform {
-        &self.transform
+impl Model {
+    pub fn new() -> Self {
+        Model {
+            sdf_cmds: Vec::with_capacity(1024),
+            history_sdf_cmds: Vec::with_capacity(1024),
+            brick_manager: BrickManager::default(),
+        }
     }
-    fn get_id(&self) -> Option<u32> {
-        self.id_model
+
+    pub fn push(&mut self, sdf_command: SDFCommandExt) {
+        self.sdf_cmds.push(sdf_command)
     }
-    fn is_dirty(&self) -> bool {
-        self.is_dirty
-    }
-    fn set_dirty(&mut self, tumbler: bool) {
-        self.is_dirty = tumbler;
-    }
-    fn get_params(&self) -> [f32; 4] {
-        self.params
+
+    pub fn render(&mut self) -> (Vec<BakePushConstants>, Vec<Instance3DData>) {
+        self.brick_manager
+            .push_commands(&mut self.history_sdf_cmds, &mut self.sdf_cmds);
+
+        self.brick_manager.get_commands(&self.history_sdf_cmds)
     }
 }

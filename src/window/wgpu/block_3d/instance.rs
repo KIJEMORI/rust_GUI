@@ -2,33 +2,13 @@ use wgpu::{BindGroupLayout, Device, SurfaceConfiguration, VertexState, util::Dev
 
 use crate::window::wgpu::{block_3d::camera_uniform::CameraUniform, shape_vertex::ShapeVertex};
 
-#[repr(C)]
+#[repr(C, align(16))]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Instance3DData {
-    pub inv_transform: glam::Mat4, // 64 байта (выровнено по 16)
-    pub params: [f32; 4],          // 16 байт (выровнено по 16)
-    pub color: u32,                // 4 байта
-    pub entity_id: u32,            // 4 байта
-    pub _padding: [u32; 2],        // 8 байт (4*2)
-}
-impl Instance3DData {
-    pub fn desc() -> wgpu::VertexBufferLayout<'static> {
-        const ATTRIBUTES: [wgpu::VertexAttribute; 7] = wgpu::vertex_attr_array![
-            0 => Float32x4, // inv_transform col 0
-            1 => Float32x4, // inv_transform col 1
-            2 => Float32x4, // inv_transform col 2
-            3 => Float32x4, // inv_transform col 3
-            4 => Unorm8x4,    // color
-            5 => Float32x4, // params
-            6 => Uint32,    // entity_id
-        ];
-
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Instance3DData>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Instance, // ВАЖНО: Instance, а не Vertex
-            attributes: &ATTRIBUTES,
-        }
-    }
+    pub inv_transform: [f32; 16], // 64 байта (выровнено по 16)
+    pub params: [f32; 4],         // 16 байт (выровнено по 16)
+    pub color: u32,               // 4 байта
+    pub _padding: [u32; 3],       // 12 байт (4*3)
 }
 
 pub struct GPUInstance3DData {

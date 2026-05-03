@@ -268,7 +268,11 @@ fn main_2() {
         }
     }
 
-    // panel.add_model(Tor::new(2.5, 0.5, [0.0, 1.5, 0.0]));
+    //panel.add_model(Sphere::new(5.0, [0.0, 0.0, 0.0]));
+
+    //panel.add_model(Cube::new(5.0, [0.0, 0.0, 0.0]));
+
+    //panel.add_model(Tor::new(2.5, 0.5, [0.0, 1.5, 0.0]));
 
     app.add(panel);
 

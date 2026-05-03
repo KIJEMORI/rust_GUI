@@ -5,6 +5,7 @@ use crate::window::component::interface::drawable::Drawable;
 
 pub type SharedDrawable = Rc<RefCell<dyn Drawable>>;
 
+#[allow(dead_code)]
 pub trait SharedDrawableExt {
     fn call_as<T: 'static>(&self) -> Option<Ref<'_, T>>;
     fn call_as_mut<T: 'static>(&self) -> Option<RefMut<'_, T>>;

@@ -156,50 +156,14 @@ impl AppWinit {
             .create_view(&wgpu::TextureViewDescriptor::default());
 
         // Создаем "записчик" команд
-        let mut encoder = state
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Main Render Encoder"),
-            });
 
-        {
-            // Начинаем проход отрисовки (Render Pass)
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                color_attachments: &[Some(RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }), // Очистка фона
-                        store: wgpu::StoreOp::Discard,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &state.depth_stencil_view, // Твоя вьюшка, которую ты обновляешь в resize
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0), // Просто очистка, даже если не используем
-                        store: wgpu::StoreOp::Discard,
-                    }),
-                    stencil_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(0), // Очищаем трафарет в 0 каждый кадр
-                        store: wgpu::StoreOp::Store,  // Сохраняем результат для тестов в этом кадре
-                    }),
-                }),
-                ..Default::default()
-            });
+        state.render(&self.gpu_ctx, &view);
 
-            state.render(&self.gpu_ctx, &mut render_pass);
-        }
         let duration = now.elapsed(); // Получаем длительность
         println!("Время кадра: {:?}", duration);
 
         // Отправляем записанные команды на выполнение в видеокарту
-        state.queue.submit(std::iter::once(encoder.finish()));
+
         output.present();
 
         self.gpu_ctx.clear();
@@ -340,7 +304,7 @@ impl ApplicationHandler for AppWinit {
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN, // Или DX12
+            backends: wgpu::Backends::PRIMARY, // Или DX12
             flags: wgpu::InstanceFlags::empty(),
             ..Default::default()
         });

@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 
 use rustc_hash::FxHashMap;
 
-use crate::disk::command_3d::RawCommand;
+use crate::window::component::block_3d::model::sdf_command::SDFCommandRaw;
 
 pub struct DiskManager {
     file: std::fs::File,
@@ -12,7 +12,7 @@ pub struct DiskManager {
 }
 
 impl DiskManager {
-    pub fn save_model(&mut self, id: u32, commands: &[RawCommand]) {
+    pub fn save_model(&mut self, id: u32, commands: &[SDFCommandRaw]) {
         let offset = self.next_offset;
         let bytes: &[u8] = bytemuck::cast_slice(commands);
 

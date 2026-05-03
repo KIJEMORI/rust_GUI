@@ -17,8 +17,7 @@ struct Instance3DData {
     transform: mat4x4<f32>,
     params: vec4<f32>,
     color: u32,
-    entity_id: u32,
-    padding: vec2<u32>,
+    padding: vec3<u32>,
 };
 
 // Тот самый универсальный вход, как в 2D
@@ -27,7 +26,7 @@ struct VertexInput {
     @location(1) color: vec4<f32>,
     @location(2) p_a: vec2<f32>,       // viewport_min
     @location(3) p_b: vec2<f32>,       // viewport_max
-    @location(4) params: vec4<f32>,
+    @location(4) params: vec4<f32>,    // [id_3d_instance, ]
     @location(5) border_color: vec4<f32>,
 };
 
@@ -48,7 +47,7 @@ fn unpack_color_unorm(c: u32) -> vec4<f32> {
 }
 
 @vertex
-fn vs_main(model: VertexInput, @builtin(instance_index) i_idx: u32) -> VertexOutput {
+fn vs_main(model: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
     let x = (model.position.x / screen.size.x) * 2.0 - 1.0;
@@ -56,7 +55,7 @@ fn vs_main(model: VertexInput, @builtin(instance_index) i_idx: u32) -> VertexOut
 
     out.clip_position = vec4<f32>(x, y, 0.0, 1.0);
     out.canvas_pos = model.position;
-    out.instance_idx = i_idx;
+    out.instance_idx = u32(model.params.x);
     out.viewport_rect = vec4<f32>(model.p_a, model.p_b);
     return out;
 }

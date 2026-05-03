@@ -55,7 +55,7 @@ impl GPUTextVertex {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&atlas_manager.view), // Теперь работает!
+                    resource: wgpu::BindingResource::TextureView(&atlas_manager.view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,

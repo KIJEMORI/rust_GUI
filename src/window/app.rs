@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
 
+use crate::window::app_winit::AppWinit;
 use crate::window::component::base::component_type::SharedDrawable;
 use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::interface::component_control::{
@@ -9,8 +10,6 @@ use crate::window::component::interface::component_control::{
 };
 use crate::window::component::interface::drawable::Drawable;
 use crate::window::component::interface::layout::Layout;
-use crate::window::component::panel::Panel;
-use crate::window::{app_winit::AppWinit, component::interface::component_control::PanelControl};
 use winit::event_loop::{ControlFlow, EventLoop};
 
 #[global_allocator]
