@@ -69,16 +69,19 @@ impl BrickManager {
     pub fn get_commands(
         &mut self,
         history: &[SDFCommandExt],
-    ) -> (Vec<BakePushConstants>, Vec<Instance3DData>) {
+    ) -> (Vec<BakePushConstants>, Vec<Instance3DData>, bool) {
         let mut total_cmds_in_batch = 0;
         let mut bake_commands = Vec::new();
         let mut instance_3d_data = Vec::new();
+
+        let mut need_more_render = false;
 
         while let Some(&dirty_brick_id) = self.dirty_bricks.front() {
             let cmds_indices = self.log_book.get(&dirty_brick_id);
             let cmds_len = cmds_indices.map(|c| c.len()).unwrap_or(0) as u32;
 
             if !bake_commands.is_empty() && total_cmds_in_batch + cmds_len > MAX_COUNT_COMMANDS {
+                need_more_render = true;
                 break;
             }
 
@@ -93,6 +96,8 @@ impl BrickManager {
             });
 
             if let Some(indices) = cmds_indices {
+                let start_idx = instance_3d_data.len();
+
                 for &idx in indices {
                     if let Some(sdf_cmd) = history.get(idx as usize) {
                         let model_matrix = sdf_cmd.transform.to_matrix(); // Mat4
@@ -107,19 +112,32 @@ impl BrickManager {
                         let mut params = sdf_cmd.params;
                         params[3] = uniform_scale;
 
+                        let material_id = sdf_cmd.material_id;
+
                         instance_3d_data.push(Instance3DData {
                             inv_transform: inv_matrix.to_cols_array(), // Передаем честно в column-major
                             params,
                             color: color_to_gpu(sdf_cmd.color),
-                            _padding: [0; 3],
+                            material_id,
+                            _padding: [0; 2],
                         });
                     }
                 }
+
+                let end_idx = instance_3d_data.len();
+                if start_idx < end_idx {
+                    instance_3d_data[start_idx..end_idx].sort_by(|a, b| {
+                        let a_is_transparent = a.params[0] > 5.5;
+                        let b_is_transparent = b.params[0] > 5.5;
+                        a_is_transparent.cmp(&b_is_transparent)
+                    });
+                }
+
                 total_cmds_in_batch += cmds_len;
             }
         }
 
-        (bake_commands, instance_3d_data)
+        (bake_commands, instance_3d_data, need_more_render)
     }
 
     fn get_id(x: u32, y: u32, z: u32) -> u32 {

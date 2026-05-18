@@ -15,7 +15,8 @@ impl Cube {
         SDFCommandExt {
             transform: transform,
             params: [SHAPE_BOX, size, 0.0, 0.0],
-            color: 0xFFFF0000,
+            color: 0xFF555555,
+            material_id: 0,
         }
     }
 }

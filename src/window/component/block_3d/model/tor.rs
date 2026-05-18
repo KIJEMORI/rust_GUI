@@ -15,7 +15,8 @@ impl Tor {
         SDFCommandExt {
             transform: transform,
             params: [SHAPE_TORUS, size1, size2, 0.0],
-            color: 0xFFFF0000,
+            color: 0xFF555555,
+            material_id: 0,
         }
     }
 }

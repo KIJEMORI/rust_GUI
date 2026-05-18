@@ -1,4 +1,4 @@
-use glam::Vec3;
+use glam::{Vec3, Vec3Swizzles};
 
 use crate::window::component::{
     block_3d::{
@@ -24,6 +24,7 @@ pub struct SDFCommandExt {
     pub transform: Transform,
     pub params: [f32; 4],
     pub color: u32,
+    pub material_id: u32,
 }
 pub trait SDFTrait {
     fn get_transform(&self) -> &Transform;
@@ -70,8 +71,6 @@ impl SDFTrait for SDFCommandExt {
         let offset = 16.0;
         let margin = 1.0;
 
-        // Переводим в координаты сетки и сразу ограничиваем [0..31]
-        // Используем малые отступы (epsilon), чтобы избежать дрожания на границах
         let start = (min_p + offset - margin).clamp(Vec3::ZERO, Vec3::splat(31.0));
         let end = (max_p + offset + margin).clamp(Vec3::ZERO, Vec3::splat(31.0));
 
@@ -90,4 +89,32 @@ impl SDFTrait for SDFCommandExt {
         }
         affected
     }
+}
+
+use glam::{Mat4, Vec2};
+
+pub fn sd_sphere(p: Vec3, s: f32) -> f32 {
+    p.length() - s
+}
+
+pub fn sd_box(p: Vec3, b: Vec3) -> f32 {
+    let q = p.abs() - b;
+    q.max(Vec3::ZERO).length() + q.x.max(q.y).max(q.z).min(0.0)
+}
+
+pub fn sd_cylinder(p: Vec3, h: Vec2) -> f32 {
+    let d = Vec2::new(p.xz().length(), p.y).abs() - h;
+    d.x.max(d.y).min(0.0) + d.max(Vec2::ZERO).length()
+}
+
+pub fn sd_capsule(p: Vec3, h: f32, r: f32) -> f32 {
+    let pa = p - Vec3::new(0.0, -h, 0.0);
+    let ba = Vec3::new(0.0, h * 2.0, 0.0);
+    let h_val = (pa.dot(ba) / ba.dot(ba)).clamp(0.0, 1.0);
+    (pa - ba * h_val).length() - r
+}
+
+pub fn smin(a: f32, b: f32, k: f32) -> f32 {
+    let h = (k - (a - b).abs()).max(0.0) / k;
+    a.min(b) - h * h * k * 0.25
 }

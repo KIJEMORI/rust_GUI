@@ -1,5 +1,5 @@
 [package]
-name = "kj-light"
+name = "kj_light"
 version = "0.1.0"
 authors = ["Vladimir Kochnev <kijemori@gmail.com>"]
 description = "Ultra-fast SDF-based GUI and 3D interaction library. < 2.5ms frame time."

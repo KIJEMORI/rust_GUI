@@ -172,6 +172,8 @@ impl WgpuState {
                     // Если любой из буферов изменился, обновляем всё, где они участвуют
                     self.brick_manager
                         .recreate_bind_group_for_baking(&self.device);
+                    // self.brick_manager
+                    //     .recreate_bind_group_for_lighting(&self.device);
                     self.brick_manager
                         .recreate_bind_group_for_render(&self.device);
                 }
@@ -179,7 +181,7 @@ impl WgpuState {
         }
     }
 
-    pub fn render(&mut self, gpu_ctx: &GpuRenderContext, view: &TextureView) {
+    pub fn render(&mut self, gpu_ctx: &GpuRenderContext, view: &TextureView, size: (u32, u32)) {
         const STRIDE: u64 = 20; // Размер DrawIndexedIndirectArgs (5 * u32)
         let use_multi_draw = self
             .device
@@ -202,6 +204,13 @@ impl WgpuState {
                 println!("Bake commands count: {}", gpu_ctx.bake_cmds.len());
                 cpass.dispatch_workgroups(gpu_ctx.bake_cmds.len() as u32, 1, 1);
             }
+            // #[cfg(feature = "3d_render")]
+            // {
+            //     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+            //     cpass.set_pipeline(&self.brick_manager.lighting_pipeline);
+            //     cpass.set_bind_group(0, &self.brick_manager.bind_group_for_lighting, &[]);
+            //     cpass.dispatch_workgroups(gpu_ctx.bake_cmds.len() as u32, 1, 1);
+            // }
         }
 
         {
@@ -249,8 +258,9 @@ impl WgpuState {
             let mut was_3d_active = false;
             let commands = &gpu_ctx.command_sections;
 
+            //render_pass.set_viewport(0.0, 0.0, size.0 as f32, size.1 as f32, 0.0, 1.0);
+
             while i < commands.len() {
-                // Извлекаем тип и параметры первой команды в текущем батче
                 let (level, is_mask, is_text, is_instance, is_unmask, start_idx) = match &commands
                     [i]
                 {
@@ -266,20 +276,27 @@ impl WgpuState {
                     }
                 };
 
-                // --- ПЕРЕКЛЮЧЕНИЕ ПАЙПЛАЙНОВ И БИНД-ГРУПП ---
-
                 if is_instance {
                     // Переключаемся на 3D
                     #[cfg(feature = "3d_render")]
-                    render_pass.set_pipeline(&self.brick_manager.render_pipeline);
-                    // Переопределяем Group 1 (вместо текстур ставим Камеру + Инстансы)
-                    #[cfg(feature = "3d_render")]
-                    render_pass.set_bind_group(1, &self.brick_manager.bind_group_for_render, &[]);
+                    {
+                        render_pass.set_pipeline(&self.brick_manager.render_pipeline);
+                        // Переопределяем Group 1 (вместо текстур ставим Камеру + Инстансы)
+
+                        render_pass.set_bind_group(
+                            1,
+                            &self.brick_manager.bind_group_for_render,
+                            &[],
+                        );
+
+                        //render_pass.set_viewport(0.0, 0.0, 1280.0, 720.0, 0.0, 1.0);
+                    }
                     was_3d_active = true;
                 } else {
-                    // Если вернулись к 2D (Shape или Text)
                     if was_3d_active {
                         render_pass.set_bind_group(1, &self.text_vertex.text_bind_group, &[]);
+                        //render_pass.set_viewport(0.0, 0.0, size.0 as f32, size.1 as f32, 0.0, 1.0);
+
                         was_3d_active = false;
                     }
 
@@ -353,6 +370,7 @@ impl WgpuState {
                 i = j;
             }
         }
+
         self.queue.submit(std::iter::once(encoder.finish()));
     }
 

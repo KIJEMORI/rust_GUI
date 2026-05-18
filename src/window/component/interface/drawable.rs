@@ -31,15 +31,15 @@ pub trait ClickableDrawable {
     fn is_clickable(&self) -> bool;
     fn remove_clickable(&mut self) -> &mut dyn ClickableDrawable;
     fn set_on_click(&mut self, action: UiCommand) -> &mut dyn ClickableDrawable;
-    fn on_click(&self);
+    fn on_click(&self, mx: u16, my: u16);
 }
 
 pub trait HoverableDrawable {
     fn is_hoverable(&self) -> bool;
     fn set_on_mouse_enter(&mut self, action: UiCommand) -> &mut dyn HoverableDrawable;
     fn set_on_mouse_leave(&mut self, action: UiCommand) -> &mut dyn HoverableDrawable;
-    fn on_mouse_enter(&self);
-    fn on_mouse_leave(&self);
+    fn on_mouse_enter(&self, mx: u16, my: u16);
+    fn on_mouse_leave(&self, mx: u16, my: u16);
 }
 
 pub trait SelectableDrawable {

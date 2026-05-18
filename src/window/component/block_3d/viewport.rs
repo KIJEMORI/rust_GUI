@@ -1,5 +1,4 @@
-use glam::Mat4;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use glam::{Vec2, Vec3};
 
 use crate::{
     add_drawable_control,
@@ -9,7 +8,12 @@ use crate::{
                 area::Area, base::Base, component_type::SharedDrawable,
                 gpu_render_context::GpuRenderContext, settings::Settings, ui_command::CommandTrait,
             },
-            block_3d::model::{model::Model, sdf_command::SDFCommandExt},
+            block_3d::model::{
+                math::{cast_ray, get_mouse_ray},
+                model::Model,
+                sdf_command::SDFCommandExt,
+                sphere::Sphere,
+            },
             interface::{
                 component_control::{ComponentControl, ComponentControlExt, PanelControl},
                 drawable::{
@@ -163,7 +167,23 @@ impl Drawable for Viewport3D {
             //     }
             // }
 
-            ctx.push_bake_commands(&rect, &mut self.model, level);
+            let (bake_cmds, instance_cmds, need_render) = self.model.render();
+
+            if need_render {
+                if let Some(tx) = &self.panel.base.settings.command_tx {
+                    let _ = tx.send(
+                        crate::window::component::base::ui_command::UiCommand::RequestRedraw(),
+                    );
+                }
+            }
+
+            ctx.push_bake_commands(
+                &rect,
+                bake_cmds,
+                instance_cmds,
+                level,
+                self.panel.base.settings.background_color,
+            );
 
             ctx.push_rect_sdf(&rect, background_color, border, level, true, true);
         }
@@ -320,6 +340,39 @@ impl ViewportControl for Viewport3D {
 
         self.orbit_controller
             .change_distance(x_offset, y_offset * sensitivity);
+    }
+    fn add_sphere(&mut self, mx: f32, my: f32) {
+        let panel_rect = self.panel.base.rect.clone();
+        let parent_rect = &self.panel.base.parent_rect;
+
+        let global_x = parent_rect.x1 + panel_rect.x1;
+        let global_y = parent_rect.y1 + panel_rect.y1;
+
+        let x = mx - global_x;
+        let y = my - global_y;
+        let size = Vec2::new(
+            panel_rect.min.get_width() as f32,
+            panel_rect.min.get_height() as f32,
+        );
+
+        let (ray_origin, ray_dir) = get_mouse_ray(
+            Vec2::new(x, y),
+            size,
+            self.camera.inv_view_proj,
+            Vec3::from_array(self.camera.camera_pos),
+        );
+
+        if let Some((hit_pos, normal)) = cast_ray(ray_origin, ray_dir, &self.model.history_sdf_cmds)
+        {
+            let sphere_radius = 0.5;
+            //let spawn_pos = hit_pos + (normal * sphere_radius);
+
+            let spawn_pos = hit_pos;
+
+            let new_command = Sphere::new(sphere_radius, spawn_pos.to_array());
+
+            self.add_model(new_command);
+        }
     }
 }
 

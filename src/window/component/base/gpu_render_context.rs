@@ -1,11 +1,4 @@
-use std::ops::Range;
-
-#[cfg(feature = "3d_render")]
-use glam::{Mat4, Vec3};
-
 use crate::window::component::base::area::{Area, AreaMath};
-#[cfg(feature = "3d_render")]
-use crate::window::component::block_3d::model::model::Model;
 
 #[cfg(feature = "3d_render")]
 use crate::window::wgpu::block_3d::brick_uniform::BakePushConstants;
@@ -398,11 +391,18 @@ impl GpuRenderContext {
     // }
 
     #[cfg(feature = "3d_render")]
-    pub fn push_bake_commands(&mut self, rect: &Area, model: &mut Model, level: u32) {
+    pub fn push_bake_commands(
+        &mut self,
+        rect: &Area,
+        bake_cmds: Vec<BakePushConstants>,
+        instances: Vec<Instance3DData>,
+        level: u32,
+        background_color: u32,
+    ) {
         // Наполняем буфер данных моделей (инстансов)
-        let (bake_cmds, instance_cmds) = model.render();
+
         self.bake_cmds = bake_cmds;
-        self.instances_3d = instance_cmds;
+        self.instances_3d = instances;
 
         let base_vertex = self.shape_vertices.len() as u32;
         let first_index = (base_vertex / 4) * 6;
@@ -418,7 +418,7 @@ impl GpuRenderContext {
         for pos in corners {
             self.shape_vertices.push(ShapeVertex {
                 position: pos,
-                color: 0,
+                color: background_color,
                 p_a: [rect.x1, rect.y1],
                 p_b: [rect.get_x2(), rect.get_y2()],
                 params: [0.0, 0.0, 0.0, 0.0],

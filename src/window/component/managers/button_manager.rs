@@ -30,7 +30,7 @@ impl ButtonManager {
                         .get_rect_without_offset(&rect);
                     if item.hover(mx, my, &area) {
                         if let Some(clickable) = item.as_clickable() {
-                            clickable.on_click();
+                            clickable.on_click(mx, my);
                         }
                         break;
                     }

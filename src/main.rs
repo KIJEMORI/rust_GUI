@@ -248,6 +248,11 @@ fn main_2() {
         .set_scrolable(true)
         .set_on_scroll(Ui3DCommand::change_distance_camera());
 
+    panel
+        .as_clickable_mut()
+        .unwrap()
+        .set_on_click(Ui3DCommand::add_sphere());
+
     let mut c = ConstBaseLayout::new();
     c.set_relative_width(90);
     c.set_relative_height(90);
@@ -255,36 +260,40 @@ fn main_2() {
         .as_layout_control_mut()
         .set_const_layout(Some(Box::new(c)));
 
-    for i in 0..100 {
-        for j in 0..100 {
-            panel.add_model(Sphere::new(
-                1.0,
-                [
-                    -100.0 / 2.0 + 1.5 * i as f32,
-                    100.0 / 2.0 - 1.5 * j as f32,
-                    0.0,
-                ],
-            ));
-        }
-    }
+    // for i in 0..100 {
+    //     for j in 0..100 {
+    //         panel.add_model(Cube::new(
+    //             1.0,
+    //             [
+    //                 -100.0 / 2.0 + 1.5 * i as f32,
+    //                 100.0 / 2.0 - 1.5 * j as f32,
+    //                 0.0,
+    //             ],
+    //         ));
+    //     }
+    // }
 
-    //panel.add_model(Sphere::new(5.0, [0.0, 0.0, 0.0]));
+    //panel.add_model(Cube::new(3.0, [0.0, 0.0, 0.0]));
 
-    //panel.add_model(Cube::new(5.0, [0.0, 0.0, 0.0]));
+    panel.add_model(Sphere::new_with_color(2.0, [0.0, 0.0, -1.0], 0xFF550000));
 
-    //panel.add_model(Tor::new(2.5, 0.5, [0.0, 1.5, 0.0]));
+    panel.add_model(Sphere::new_with_color(2.0, [0.0, 0.0, 1.0], 0xFF000055));
+
+    //panel.add_model(Sphere::new_with_color(2.0, [0.0, 0.0, 0.0], 0xFF555555));
+
+    //panel.add_model(Tor::new(2.0, 0.5, [0.0, 0.0, 0.0]));
 
     app.add(panel);
 
-    let mut label2 = Label::new("Настройки".to_string());
-    label2
-        .as_panel_control_mut()
-        .set_height(40)
-        .set_width(400)
-        .set_background(0xFFFF0000);
-    label2.set_font_color(0xFF000000);
+    // let mut label2 = Label::new("Настройки".to_string());
+    // label2
+    //     .as_panel_control_mut()
+    //     .set_height(40)
+    //     .set_width(400)
+    //     .set_background(0xFFFF0000);
+    // label2.set_font_color(0xFF000000);
 
-    app.add(label2);
+    // app.add(label2);
 
     app.run();
 

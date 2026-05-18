@@ -8,7 +8,8 @@ pub struct Instance3DData {
     pub inv_transform: [f32; 16], // 64 байта (выровнено по 16)
     pub params: [f32; 4],         // 16 байт (выровнено по 16)
     pub color: u32,               // 4 байта
-    pub _padding: [u32; 3],       // 12 байт (4*3)
+    pub material_id: u32,         // 4 байта
+    pub _padding: [u32; 2],       // 8 байт (4*2)
 }
 
 pub struct GPUInstance3DData {

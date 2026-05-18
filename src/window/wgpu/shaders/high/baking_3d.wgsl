@@ -9,9 +9,9 @@ struct Instance3DData {
     inv_transform: mat4x4<f32>,
     params: vec4<f32>,
     color: u32,
+    material_id: u32,
     pad0: u32,
     pad1: u32,
-    pad2: u32,
 }
 
 @group(0) @binding(0) var<storage, read> bake_info: array<BakePushConstants>;
@@ -63,85 +63,8 @@ fn unpack_color_unorm(c: u32) -> vec4<f32> {
     );
 }
 
-// @compute @workgroup_size(8, 8, 1)
-// fn cs_main(
-//     @builtin(local_invocation_id) local_id: vec3<u32>,
-//     @builtin(workgroup_id) group_id: vec3<u32>
-// ) {
-//     let task = bake_info[group_id.x];
-//     let b_id = task.brick_id; // ID от Rust (x + y*32 + z*1024)
-
-//     // Распаковка b_id (строго по формуле из Rust)
-//     let b_z = b_id / 1024u;
-//     let b_y = (b_id % 1024u) / 32u;
-//     let b_x = b_id % 32u;
-//     let world_origin = vec3<f32>(f32(b_x), f32(b_y), f32(b_z)) - 16.0;
-
-//     let col = b_id % 64u;
-//     let row = b_id / 64u;
-
-//     let k = 0.3;
-
-//     for (var lz = 0u; lz < 8u; lz++) {
-
-//         let local_v = vec3<f32>(f32(local_id.x) + 0.5, f32(local_id.y) + 0.5, f32(lz) + 0.5);
-
-//         // ВАЖНО: local_v / 8.0 переводит 0..8 в 0..1 метр
-//         let world_p = world_origin + (local_v / 8.0);
-
-//         var res = 10.0;
-//         var final_color = vec4(0.0);
-
-//         for (var i = 0u; i < task.count; i++) {
-//             let inst = instances[task.start_instance + i];
-//             let local_p = (inst.inv_transform * vec4<f32>(world_p, 1.0)).xyz;
-
-//             let tag = inst.params.x;
-//             let size = inst.params.y;
-
-//             var d: f32;
-
-//             if tag < 1.5 { // 1.0 Сфера
-
-//                 let sphere_pos = inst.inv_transform[3].xyz;
-
-//                 d = sd_sphere(world_p - sphere_pos, size);
-//             } else if tag < 2.5 { // 2.0 Куб
-//                 d = sd_box(local_p, vec3<f32>(size));
-//             } else if tag < 3.5 { // 3.0 Тор
-//                 // params.z используется как толщина кольца
-//                 d = sd_torus(local_p, vec2<f32>(size, inst.params.z));
-//             } else if tag < 4.5 { // 4.0 Цилиндр
-//                 // params.z используется как высота
-//                 d = sd_cylinder(local_p, vec2<f32>(size, inst.params.z));
-//             } else { // 5.0 Капсула
-//                 d = sd_capsule(local_p, inst.params.z, size);
-//             }
-
-//             let base_color = unpack_color_unorm(inst.color);
-
-//             // Считаем SDF по чистой евклидовой дистанции
-//             // d = length(world_p - sphere_pos) - size;
-
-//             if i == 0u {
-//                 res = d;
-//                 final_color = base_color;
-//             } else {
-//                 let h = clamp(0.5 + 0.5 * (res - d) / k, 0.0, 1.0);
-//                 res = smin(res, d, k);
-
-//                 final_color = mix(final_color, base_color, h);
-//             }
-//         }
-
-//         let tx = clamp(i32((b_id % 64u) * 64u + lz * 8u + local_id.x), 0, 4095);
-//         let ty = clamp(i32((b_id / 64u) * 8u + local_id.y), 0, 4095);
-
-//         textureStore(atlas_texture, vec2<i32>(tx, ty), vec4<f32>(res, final_color.rgb));
-//     }
-// }
-
-@group(0) @binding(2) var atlas_texture: texture_storage_3d<rgba16float, write>;
+@group(0) @binding(2) var atlas_sdf: texture_storage_2d<r32float, write>;
+@group(0) @binding(3) var atlas_color: texture_storage_2d<rgba8unorm, write>;
 
 @compute @workgroup_size(8, 8, 1)
 fn cs_main(
@@ -149,9 +72,8 @@ fn cs_main(
     @builtin(workgroup_id) group_id: vec3<u32>
 ) {
     let task = bake_info[group_id.x];
-    let b_id = task.brick_id; // Это ID кирпича (от 0 до 32767)
+    let b_id = task.brick_id;
 
-    // Распаковываем 1D индекс в 3D координаты КИРПИЧА
     let b_x = b_id % 32u;
     let b_y = (b_id / 32u) % 32u;
     let b_z = b_id / 1024u;
@@ -160,58 +82,71 @@ fn cs_main(
 
     let k = 0.3;
 
+    let tile_x = (b_id % 64u) * 64u;
+    let tile_y = (b_id / 64u) * 8u;
+
     for (var lz = 0u; lz < 8u; lz++) {
         let local_v = vec3<f32>(f32(local_id.x) + 0.5, f32(local_id.y) + 0.5, f32(lz) + 0.5);
         let world_p = world_origin + (local_v / 8.0);
 
-        var res = 10.0;
-        var final_color = vec4<f32>(0.0);
+        var res = 10.0; // Общая честная дистанция для всего
+        var final_color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+        var has_color = false;
 
         for (var i = 0u; i < task.count; i++) {
             let inst = instances[task.start_instance + i];
             let local_p = (inst.inv_transform * vec4<f32>(world_p, 1.0)).xyz;
-
             let tag = inst.params.x;
             let size = inst.params.y;
-            let uniform_scale = inst.params.w; // Извлеченный масштаб из params.w
+            let uniform_scale = inst.params.w;
 
             var d: f32;
-
-            if tag < 1.5 { // Сфера
-                // Возвращаем SDF в честные мировые координаты
-                d = sd_sphere(local_p, size) * uniform_scale;
-            } else if tag < 2.5 { // Куб
-                d = sd_box(local_p, vec3<f32>(size)) * uniform_scale;
-            } else if tag < 3.5 { // Тор
-                d = sd_torus(local_p, vec2<f32>(size, inst.params.z)) * uniform_scale;
-            } else if tag < 4.5 { // Цилиндр
-                d = sd_cylinder(local_p, vec2<f32>(size, inst.params.z)) * uniform_scale;
-            } else { // Капсула
-                d = sd_capsule(local_p, inst.params.z, size) * uniform_scale;
-            }
+            if tag < 1.5 { d = sd_sphere(local_p, size) * uniform_scale; }
+            else if tag < 2.5 { d = sd_box(local_p, vec3<f32>(size)) * uniform_scale; }
+            else if tag < 3.5 { d = sd_torus(local_p, vec2<f32>(size, inst.params.z)) * uniform_scale; }
+            else if tag < 4.5 { d = sd_cylinder(local_p, vec2<f32>(size, inst.params.z)) * uniform_scale; }
+            else if tag < 5.5 { d = sd_capsule(local_p, inst.params.z, size) * uniform_scale; }
+            else { d = sd_sphere(local_p, size) * uniform_scale; }
 
             let base_color = unpack_color_unorm(inst.color);
+            let mat_id = inst.material_id;
 
-            if i == 0u {
+            // Всегда берем минимальную дистанцию (smin)
+            if !has_color {
                 res = d;
-                final_color = base_color;
+                // Записываем цвет и закладываем ID материала в альфу для фрагментного шейдера
+                let mat_norm = f32(mat_id) / 255.0;
+                final_color = vec4<f32>(base_color.rgb, mat_norm);
+                has_color = true;
             } else {
                 let h = clamp(0.5 + 0.5 * (res - d) / k, 0.0, 1.0);
                 res = smin(res, d, k);
 
-                final_color = mix(final_color, base_color, h);
+                // Если это стекло, мы не даем ему полностью перетереть цвет непрозрачного объекта
+                var mix_color = base_color.rgb;
+                if mat_id == 1u {
+                    mix_color = mix(final_color.rgb, base_color.rgb, 0.45);
+                } else {
+                    mix_color = mix(final_color.rgb, base_color.rgb, h);
+                }
+
+                // Сохраняем ID того материала, который оказался ближе
+                var current_mat_id = mat_id;
+                if res < d {
+                    current_mat_id = u32(final_color.a * 255.0 + 0.5);
+                }
+
+                let mat_norm = f32(current_mat_id) / 255.0;
+                final_color = vec4<f32>(mix_color, mat_norm);
             }
         }
-        let normalized_sdf = clamp(res / 32.0 + 0.5, 0.0, 1.0);
 
-        let voxel_data = vec4<f32>(normalized_sdf, final_color.rgb);
+        let voxel_x = tile_x + local_id.x + (lz * 8u);
+        let voxel_y = tile_y + local_id.y;
+        let uv = vec2<i32>(i32(voxel_x), i32(voxel_y));
 
-        let voxel_coords = vec3<i32>(
-            i32(b_x * 8u + local_id.x),
-            i32(b_y * 8u + local_id.y),
-            i32(b_z * 8u + lz)
-        );
-
-        textureStore(atlas_texture, voxel_coords, voxel_data);
+        // Пишем чистый f32 в R-канал (никакой упаковки pack2x16 не нужно!)
+        textureStore(atlas_sdf, uv, vec4<f32>(res, 0.0, 0.0, 0.0));
+        textureStore(atlas_color, uv, final_color);
     }
 }

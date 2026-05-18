@@ -157,7 +157,14 @@ impl AppWinit {
 
         // Создаем "записчик" команд
 
-        state.render(&self.gpu_ctx, &view);
+        if let (Some(window), Some(state)) = (&self.window, &mut self.state) {
+            let window_size = window.inner_size();
+            state.render(
+                &self.gpu_ctx,
+                &view,
+                (window_size.width, window_size.height),
+            );
+        }
 
         let duration = now.elapsed(); // Получаем длительность
         println!("Время кадра: {:?}", duration);
@@ -204,10 +211,9 @@ impl AppWinit {
                     self.execute_command(c, needs_layout, resize);
                 }
             }
-            UiCommand::ChangeColor(_, _) | UiCommand::RequestRedrawWithoutResize() => {
-                *needs_layout = true;
-            }
-            UiCommand::SetScale(_, _)
+            UiCommand::ChangeColor(_, _)
+            | UiCommand::RequestRedrawWithoutResize()
+            | UiCommand::SetScale(_, _)
             | UiCommand::SetText(_, _)
             | UiCommand::RequestRedraw()
             | UiCommand::Custom(_, _)

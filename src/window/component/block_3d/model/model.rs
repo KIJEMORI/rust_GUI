@@ -7,7 +7,7 @@ use crate::window::{
 
 pub struct Model {
     sdf_cmds: Vec<SDFCommandExt>,
-    history_sdf_cmds: Vec<SDFCommandExt>,
+    pub history_sdf_cmds: Vec<SDFCommandExt>,
     brick_manager: BrickManager,
 }
 
@@ -36,7 +36,7 @@ impl Model {
         self.sdf_cmds.push(sdf_command)
     }
 
-    pub fn render(&mut self) -> (Vec<BakePushConstants>, Vec<Instance3DData>) {
+    pub fn render(&mut self) -> (Vec<BakePushConstants>, Vec<Instance3DData>, bool) {
         self.brick_manager
             .push_commands(&mut self.history_sdf_cmds, &mut self.sdf_cmds);
 

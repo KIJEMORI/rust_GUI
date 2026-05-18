@@ -40,7 +40,7 @@ impl HoverManager {
                             return;
                         }
                         if let Some(hoverable) = item.as_hoverable() {
-                            hoverable.on_mouse_leave();
+                            hoverable.on_mouse_leave(mx, my);
                         }
                         hovered_is_none = true;
                     }
@@ -65,7 +65,7 @@ impl HoverManager {
                         if item.hover(mx, my, &area) {
                             self.hovered_element = Some(id.clone());
                             if let Some(hoverable) = item.as_hoverable() {
-                                hoverable.on_mouse_enter();
+                                hoverable.on_mouse_enter(mx, my);
                             }
                             break;
                         }

@@ -111,11 +111,12 @@ impl ClickableDrawable for Panel {
         self
     }
 
-    fn on_click(&self) {
+    fn on_click(&self, mx: u16, my: u16) {
         if let Some(cmd) = &self.on_click {
             let command_to_send = cmd.clone();
 
             command_to_send.fill_ref(&self.base.id);
+            command_to_send.fill_coord(mx as f32, my as f32);
 
             if let Some(tx) = &self.base.settings.command_tx {
                 let _ = tx.send(command_to_send);
@@ -128,22 +129,24 @@ impl HoverableDrawable for Panel {
     fn is_hoverable(&self) -> bool {
         self.on_mouse_enter.is_some() || self.on_mouse_leave.is_some()
     }
-    fn on_mouse_enter(&self) {
+    fn on_mouse_enter(&self, mx: u16, my: u16) {
         if let Some(cmd) = &self.on_mouse_enter {
             let command_to_send = cmd.clone();
 
             command_to_send.fill_ref(&self.base.id);
+            command_to_send.fill_coord(mx as f32, my as f32);
 
             if let Some(tx) = &self.base.settings.command_tx {
                 let _ = tx.send(command_to_send);
             }
         }
     }
-    fn on_mouse_leave(&self) {
+    fn on_mouse_leave(&self, mx: u16, my: u16) {
         if let Some(cmd) = &self.on_mouse_leave {
             let command_to_send = cmd.clone();
 
             command_to_send.fill_ref(&self.base.id);
+            command_to_send.fill_coord(mx as f32, my as f32);
 
             if let Some(tx) = &self.base.settings.command_tx {
                 let _ = tx.send(command_to_send);
