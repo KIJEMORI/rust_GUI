@@ -9,8 +9,8 @@ use crate::window::{
     },
 };
 use wgpu::{
-    Device, Queue, RenderPass, RenderPassColorAttachment, Surface as WgpuSurface,
-    SurfaceConfiguration, TextureView, util::DeviceExt,
+    Device, Queue, RenderPassColorAttachment, Surface as WgpuSurface, SurfaceConfiguration,
+    TextureView, util::DeviceExt,
 };
 pub struct WgpuState {
     // База

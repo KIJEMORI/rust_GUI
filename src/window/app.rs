@@ -12,6 +12,7 @@ use crate::window::component::interface::drawable::Drawable;
 use crate::window::component::interface::layout::Layout;
 use winit::event_loop::{ControlFlow, EventLoop};
 
+#[cfg(not(target_arch = "wasm32"))]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

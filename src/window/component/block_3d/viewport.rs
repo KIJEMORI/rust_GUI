@@ -10,6 +10,7 @@ use crate::{
             },
             block_3d::{
                 model::{
+                    cube::Cube,
                     math::{cast_ray, get_mouse_ray},
                     model::Model,
                     sdf_command::SDFCommandExt,

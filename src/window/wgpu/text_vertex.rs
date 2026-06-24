@@ -1,4 +1,4 @@
-use std::time::Instant;
+use web_time::Instant;
 
 pub struct GPUTextVertex {
     pub text_bind_group_layout: wgpu::BindGroupLayout,

@@ -44,7 +44,7 @@ impl AnimationManager {
             }
         }
     }
-    pub fn update(&mut self, tx: &Sender<UiCommand>, id_manager: &IDManager) -> bool {
+    pub fn update(&mut self, _tx: &Sender<UiCommand>, id_manager: &IDManager) -> bool {
         let now = Instant::now();
         let mut changed = false;
         for (id, seq) in &mut self.active {

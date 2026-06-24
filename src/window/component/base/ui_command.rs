@@ -1,4 +1,4 @@
-use std::{cell::Cell, ops::DerefMut, option, rc::Rc, time::Duration};
+use std::{cell::Cell, rc::Rc, time::Duration};
 
 use crate::window::component::{
     animation::animation_action::AnimationSequence,

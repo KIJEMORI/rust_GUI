@@ -51,7 +51,7 @@ impl Drawable for ScrollSlider {
     fn resize(&mut self, area: &Area, ctx: &LayoutContext, auto_size: bool) -> Area {
         let rect = self.panel.resize(area, ctx, auto_size);
 
-        let id = self.as_base().id;
+        // let id = self.as_base().id;
 
         // if let Some(scroll) = &mut self.panel.scroll {
         //     let mut height = scroll.height;

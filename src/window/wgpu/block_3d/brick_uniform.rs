@@ -66,7 +66,7 @@ impl GPUBrickRender {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Float,
+            format: wgpu::TextureFormat::Rg32Float,
             usage: wgpu::TextureUsages::STORAGE_BINDING
                 | wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::COPY_DST,
@@ -125,7 +125,8 @@ impl GPUBrickRender {
 
         let sdf_elements = (atlas_size * atlas_size) as usize;
 
-        let clear_data_sdf = vec![10.0f32; sdf_elements]; // Пишем прямо f32!
+        // let clear_data_sdf = vec![10.0f32; sdf_elements]; // Пишем прямо f32!
+        let clear_data_sdf = vec![[10.0f32, 0.0f32]; sdf_elements];
 
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -137,7 +138,7 @@ impl GPUBrickRender {
             bytemuck::cast_slice(&clear_data_sdf),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(atlas_size * 4),
+                bytes_per_row: Some(atlas_size * 8),
                 rows_per_image: Some(atlas_size),
             },
             wgpu::Extent3d {
@@ -222,7 +223,7 @@ impl GPUBrickRender {
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::StorageTexture {
                             access: wgpu::StorageTextureAccess::WriteOnly,
-                            format: wgpu::TextureFormat::R32Float,
+                            format: wgpu::TextureFormat::Rg32Float,
                             view_dimension: wgpu::TextureViewDimension::D2,
                         },
                         count: None,

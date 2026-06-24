@@ -21,11 +21,14 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::{KeyEvent, Modifiers, MouseScrollDelta, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId};
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
 
 pub struct AppWinit {
     window: Option<Arc<Window>>,
@@ -224,7 +227,7 @@ impl AppWinit {
                 }
             }
             UiCommand::RequestRedrawWithTimer(time) => {
-                let scheduled = std::time::Instant::now() + time;
+                let scheduled = Instant::now() + time;
                 self.next_redraw = Some(match self.next_redraw {
                     Some(current) => current.min(scheduled),
                     None => scheduled,
@@ -323,70 +326,151 @@ impl AppWinit {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+use winit::platform::web::WindowAttributesExtWebSys;
+
 impl ApplicationHandler for AppWinit {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let window_attributes = Window::default_attributes().with_title("LOL");
+        // Если состояние уже инициализировано (например, при повторном resumed на Android/iOS), выходим
+        if self.state.is_some() {
+            return;
+        }
+
+        let mut window_attributes = Window::default_attributes().with_title("LOL");
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let window = web_sys::window().unwrap();
+            let document = window.document().unwrap();
+            let canvas = document
+                .get_element_by_id("canvas")
+                .unwrap()
+                .dyn_into::<web_sys::HtmlCanvasElement>()
+                .unwrap();
+
+            window_attributes = window_attributes.with_canvas(Some(canvas));
+        }
+
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY, // Или DX12
+            backends: if cfg!(target_arch = "wasm32") {
+                wgpu::Backends::BROWSER_WEBGPU
+            } else {
+                wgpu::Backends::PRIMARY
+            },
             flags: wgpu::InstanceFlags::empty(),
             ..Default::default()
         });
 
-        //Surface (холст окна) - требует 'static lifetime или Arc
         let surface = instance.create_surface(window.clone()).unwrap();
 
-        // Запрашиваем видеокарту (Адаптер)
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            compatible_surface: Some(&surface),
-            ..Default::default()
-        }))
-        .expect("Не удалось найти видеокарту");
-
-        let mut required_features = wgpu::Features::empty();
-        if adapter
-            .features()
-            .contains(wgpu::Features::MULTI_DRAW_INDIRECT)
+        // НА ПК: Выполняем синхронно через pollster
+        #[cfg(not(target_arch = "wasm32"))]
         {
-            required_features |= wgpu::Features::MULTI_DRAW_INDIRECT;
-            println!("MultiDrawIndirect — on");
-        } else {
-            println!("MultiDrawIndirect — off");
+            let adapter =
+                pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                    compatible_surface: Some(&surface),
+                    ..Default::default()
+                }))
+                .expect("Не удалось найти видеокарту");
+
+            let mut required_features = wgpu::Features::empty();
+            if adapter
+                .features()
+                .contains(wgpu::Features::MULTI_DRAW_INDIRECT)
+            {
+                required_features |= wgpu::Features::MULTI_DRAW_INDIRECT;
+            }
+
+            let (device, queue) =
+                pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                    label: Some("My Device"),
+                    required_features,
+                    required_limits: wgpu::Limits::default(),
+                    memory_hints: wgpu::MemoryHints::default(),
+                    ..Default::default()
+                }))
+                .expect("Не удалось создать устройство wgpu");
+
+            let size = window.inner_size();
+            let mut config = surface
+                .get_default_config(&adapter, size.width, size.height)
+                .unwrap();
+            let caps = surface.get_capabilities(&adapter);
+
+            config.present_mode = if caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
+                wgpu::PresentMode::Mailbox
+            } else if caps.present_modes.contains(&wgpu::PresentMode::Immediate) {
+                wgpu::PresentMode::Immediate
+            } else {
+                wgpu::PresentMode::Fifo
+            };
+
+            surface.configure(&device, &config);
+
+            self.state = Some(WgpuState::new(surface, device, queue, config));
+            self.window = Some(window);
         }
 
-        // Создаем логическое устройство и очередь команд
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("My Device"),
-            required_features,
-            required_limits: wgpu::Limits::default(),
-            memory_hints: wgpu::MemoryHints::default(),
-            ..Default::default()
-        }))
-        .expect("Не удалось создать устройство wgpu");
+        // В ВЕБЕ: Запускаем асинхронный контекст без блокировки основного потока браузера
+        #[cfg(target_arch = "wasm32")]
+        {
+            let window_clone = window.clone();
+            // Ссылку на саму instance можно безопасно клонировать или захватить, так как она дешевая
+            let instance_clone = instance.clone();
+            let self_ptr = self as *mut Self;
 
-        // Конфигурация поверхности под размер окна
-        let size = window.inner_size();
-        let mut config = surface
-            .get_default_config(&adapter, size.width, size.height)
-            .unwrap();
-        let caps = surface.get_capabilities(&adapter);
-        let present_mode = if caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
-            wgpu::PresentMode::Mailbox
-        } else if caps.present_modes.contains(&wgpu::PresentMode::Immediate) {
-            wgpu::PresentMode::Immediate
-        } else {
-            wgpu::PresentMode::Fifo // Дефолтный вариант
-        };
+            wasm_bindgen_futures::spawn_local(async move {
+                // ИСПРАВЛЕНИЕ: Создаем surface прямо внутри асинхронного потока веба из клона окна!
+                let surface_clone = instance_clone.create_surface(window_clone.clone()).unwrap();
 
-        //let present_mode = wgpu::PresentMode::Fifo;
+                let adapter = instance_clone
+                    .request_adapter(&wgpu::RequestAdapterOptions {
+                        compatible_surface: Some(&surface_clone),
+                        ..Default::default()
+                    })
+                    .await
+                    .expect("Не удалось найти WebGPU адаптер");
 
-        config.present_mode = present_mode;
+                let mut required_features = wgpu::Features::empty();
+                if adapter
+                    .features()
+                    .contains(wgpu::Features::MULTI_DRAW_INDIRECT)
+                {
+                    required_features |= wgpu::Features::MULTI_DRAW_INDIRECT;
+                }
 
-        surface.configure(&device, &config);
+                let (device, queue) = adapter
+                    .request_device(&wgpu::DeviceDescriptor {
+                        label: Some("My Web Device"),
+                        required_features,
+                        required_limits: wgpu::Limits::default(),
+                        memory_hints: wgpu::MemoryHints::default(),
+                        ..Default::default()
+                    })
+                    .await
+                    .expect("Не удалось создать устройство wgpu");
 
-        self.state = Some(WgpuState::new(surface, device, queue, config));
-        self.window = Some(window);
+                let size = window_clone.inner_size();
+                let mut config = surface_clone
+                    .get_default_config(&adapter, size.width, size.height)
+                    .unwrap();
+
+                config.present_mode = wgpu::PresentMode::Fifo;
+                surface_clone.configure(&device, &config);
+
+                unsafe {
+                    (*self_ptr).state = Some(WgpuState::new(surface_clone, device, queue, config));
+                    (*self_ptr).window = Some(window_clone);
+                }
+
+                // Запрашиваем первую отрисовку кадра
+                if let Some(w) = unsafe { &(*self_ptr).window } {
+                    w.request_redraw();
+                }
+            });
+        }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {

@@ -264,12 +264,7 @@ pub fn main_2() {
         .as_layout_control_mut()
         .set_const_layout(Some(Box::new(c)));
 
-    // panel.add_model(Sphere::new_with_color(2.0, [0.0, -1.0, 0.0], 0xFFFF0000));
-    // panel.add_model(Sphere::new_with_color(2.0, [0.0, 1.0, 0.0], 0xFF0000FF));
-
-    panel.add_model(Sphere::new_with_color(2.0, [0.0, 0.0, 0.0], 0xFF555555));
-
-    //panel.add_model(Sphere::new_with_color(2.0, [7.0, 0.0, 0.0], 0xFFFF5555));
+    panel.add_model(Sphere::new_with_color(2.0, [0.0, 0.0, 0.0], 0xFF55FF55));
 
     let panel = app.add(panel);
 
@@ -715,8 +710,23 @@ pub fn main_2() {
     app.run();
 }
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
 #[cfg(not(target_os = "android"))]
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     //main_1();
+    main_2();
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(start)]
+pub fn run_wasm() {
+    // Перенаправляем паники Rust в консоль разработчика (F12)
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+    console_log::init_with_level(log::Level::Warn).expect("Couldn't initialize logger");
+
+    // Запускаем асинхронный таск в браузере
     main_2();
 }

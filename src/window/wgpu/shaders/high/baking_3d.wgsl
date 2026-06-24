@@ -63,7 +63,71 @@ fn unpack_color_unorm(c: u32) -> vec4<f32> {
     );
 }
 
-@group(0) @binding(2) var atlas_sdf: texture_storage_2d<r32float, write>;
+fn pack_direction(dir: vec3<f32>) -> f32 {
+    let normalized_dir = normalize(dir);
+    // Переводим вектор в сферические координаты (углы)
+    let phi = atan2(normalized_dir.y, normalized_dir.x); // [-PI, PI]
+    let theta = acos(normalized_dir.z);                  // [0, PI]
+
+    // Нормализуем углы в диапазон [0.0, 1.0] для упаковки
+    let u = (phi + 3.14159265) / (2.0 * 3.14159265);
+    let v = theta / 3.14159265;
+
+    // Упаковываем два f32 (f16 точности) в один u32, затем превращаем в f32 бит в бит
+    let packed_u32 = pack2x16unorm(vec2<f32>(u, v));
+    return bitcast<f32>(packed_u32);
+}
+
+fn evaluate_sdf_at_point(world_p: vec3<f32>, task: BakePushConstants) -> f32 {
+    var res = 10.0; // Стартовая дефолтная дистанция пустоты
+    var has_color = false; // Флаг для первой фигуры (вспомогательный для логики)
+    let k = 0.3;    // Коэффициент сглаживания SMOOTH-операций
+
+    for (var i = 0u; i < task.count; i++) {
+        let inst = instances[task.start_instance + i];
+
+        // Переводим смещенную мировую точку в локальные координаты инстанса
+        let local_p = (inst.inv_transform * vec4<f32>(world_p, 1.0)).xyz;
+        let tag = inst.params.x;
+        let size = inst.params.y;
+        let uniform_scale = inst.params.w;
+
+        // Расчет базовой формы фигуры
+        var d: f32;
+        if tag < 1.5 { d = sd_sphere(local_p, size) * uniform_scale; }
+        else if tag < 2.5 { d = sd_box(local_p, vec3<f32>(size)) * uniform_scale; }
+        else if tag < 3.5 { d = sd_torus(local_p, vec2<f32>(size, inst.params.z)) * uniform_scale; }
+        else if tag < 4.5 { d = sd_cylinder(local_p, vec2<f32>(size, inst.params.z)) * uniform_scale; }
+        else if tag < 5.5 { d = sd_capsule(local_p, inst.params.z, size) * uniform_scale; }
+        else { d = sd_sphere(local_p, size) * uniform_scale; }
+
+        if !has_color {
+            res = d;
+            has_color = true;
+        } else {
+            let type_union = inst.type_union;
+
+            // Математика изменения дистанции (CSG)
+            if type_union < 0.5 { // UNION
+                res = min(res, d);
+            }
+            else if type_union < 1.5 { // INTERSECTION
+                res = max(res, d);
+            }
+            else if type_union < 2.5 { // SUBTRACTION
+                res = max(res, -d);
+            }
+            else if type_union < 3.5 { // SMOOTH
+                res = smin(res, d, k);
+            }
+            // COLOR_DRAWING не влияет на геометрию (дистанцию), поэтому здесь его пропускаем
+        }
+    }
+
+    return res;
+}
+
+@group(0) @binding(2) var atlas_sdf: texture_storage_2d<rg32float, write>;
 @group(0) @binding(3) var atlas_color: texture_storage_2d<rgba8unorm, write>;
 
 @compute @workgroup_size(8, 8, 1)
@@ -156,12 +220,37 @@ fn cs_main(
             }
         }
 
+        var grad_dir = vec3<f32>(1.0, 0.0, 0.0); // Дефолтное значение
+
+        // Считаем градиент только вблизи поверхности или внутри объектов,
+        // чтобы не тратить ресурсы на пустой космос (где res == 10.0)
+        if res < 5.0 {
+            let eps = 0.005; // Небольшой шаг для проверки изменения расстояния
+
+            // Функция-помощник для быстрого перерасчета SDF в смещенной точке
+            let res_x = evaluate_sdf_at_point(world_p + vec3<f32>(eps, 0.0, 0.0), task);
+            let res_y = evaluate_sdf_at_point(world_p + vec3<f32>(0.0, eps, 0.0), task);
+            let res_z = evaluate_sdf_at_point(world_p + vec3<f32>(0.0, 0.0, eps), task);
+
+            // Направление — это вектор изменения знака расстояния
+            grad_dir = vec3<f32>(res_x - res, res_y - res, res_z - res);
+
+            // Защита от деления на ноль, если мы глубоко внутри или значения совпали
+            if length(grad_dir) > 0.0001 {
+                grad_dir = normalize(grad_dir);
+            } else {
+                grad_dir = vec3<f32>(0.0, 1.0, 0.0);
+            }
+        }
+
+        let packed_g = pack_direction(grad_dir);
+
         let voxel_x = tile_x + local_id.x + (lz * 8u);
         let voxel_y = tile_y + local_id.y;
         let uv = vec2<i32>(i32(voxel_x), i32(voxel_y));
 
-        // Пишем чистый f32 в R-канал (никакой упаковки pack2x16 не нужно!)
-        textureStore(atlas_sdf, uv, vec4<f32>(res, 0.0, 0.0, 0.0));
+        // Пишем SDF в R-канал, а упакованное направление в G-канал!
+        textureStore(atlas_sdf, uv, vec4<f32>(res, packed_g, 0.0, 0.0));
         textureStore(atlas_color, uv, vec4<f32>(final_color.rgba));
     }
 }
