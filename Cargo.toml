@@ -20,18 +20,28 @@ android_logger = "0.14"
 log = "0.4"
 bytemuck = { version = "1.16", features = ["derive"] }
 pollster = "0.3"
-mimalloc = "0.1"
 fontdue = "0.9.3"
 rustc-hash = "2.1.0"
 rayon = "1.10.0"
 glam = { version = "0.29", features = ["bytemuck"] }
+web-time = "1.1"
 
-[target.'cfg(not(target_os = "android"))'.dependencies]
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+mimalloc = "0.1"
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
 arboard = "3.6.1"
 
 [target.'cfg(target_os = "android")'.dependencies]
 winit = { version = "0.30.5", features = ["rwh_06", "android-native-activity"] }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2.92"
+wasm-bindgen-futures = "0.4.42"
+web-sys = { version = "0.3.69", features = ["Document", "Window", "Element", "HtmlCanvasElement"] }
+console_error_panic_hook = "0.1.7" # Чтобы паники Rust красиво выводились в консоль браузера
+console_log = "1.0.0"
+
 [features]
-default = []
+default = ["3d_render"]
 3d_render = []
