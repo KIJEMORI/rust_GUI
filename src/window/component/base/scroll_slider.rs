@@ -175,6 +175,10 @@ impl Drawable for ScrollSlider {
         return rect;
     }
 
+    fn redraw(&self) {
+        self.panel.redraw();
+    }
+
     fn hover(&self, mx: u16, my: u16, _area: &Area) -> bool {
         let mut panel_rect = self.panel.base.rect.clone();
         let parent_rect = &self.panel.base.parent_rect;

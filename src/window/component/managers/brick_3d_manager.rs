@@ -119,7 +119,8 @@ impl BrickManager {
                             params,
                             color: color_to_gpu(sdf_cmd.color),
                             material_id,
-                            _padding: [0; 2],
+                            type_union: sdf_cmd.type_union as f32,
+                            _padding: 0,
                         });
                     }
                 }

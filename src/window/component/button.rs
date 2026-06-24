@@ -8,8 +8,8 @@ use crate::window::component::base::ui_command::UiCommand;
 use crate::window::component::interface::component_control::{LabelControl, PanelControl};
 
 use crate::window::component::interface::drawable::{
-    AnimationDrawable, ClickableDrawable, Drawable, HoverableDrawable, LayoutDrawable,
-    ScrollableDrawable, SelectableDrawable,
+    AnimationDrawable, ClickableDrawable, Drawable, HoverableDrawable, KeyboardControlDrawable,
+    LayoutDrawable, ScrollableDrawable, SelectableDrawable,
 };
 use crate::window::component::label::Label;
 
@@ -46,6 +46,9 @@ impl Drawable for Button {
     }
     fn resize_one(&mut self, ctx: &LayoutContext) {
         self.label.resize_one(ctx);
+    }
+    fn redraw(&self) {
+        self.label.redraw();
     }
 
     add_drawable_control!();
@@ -117,5 +120,23 @@ impl Drawable for Button {
     }
     fn as_scrollable_mut(&mut self) -> Option<&mut dyn ScrollableDrawable> {
         self.label.as_scrollable_mut()
+    }
+    fn as_keyboard_control(&self) -> Option<&dyn KeyboardControlDrawable> {
+        Some(self)
+    }
+    fn as_keyboard_control_mut(&mut self) -> Option<&mut dyn KeyboardControlDrawable> {
+        Some(self)
+    }
+}
+
+impl KeyboardControlDrawable for Button {
+    fn is_keyboard_control(&self) -> bool {
+        self.label.is_keyboard_control()
+    }
+    fn on_enter_press(&mut self) {
+        self.label.on_enter_press();
+    }
+    fn set_on_enter_press(&mut self, command: UiCommand) -> &mut dyn KeyboardControlDrawable {
+        self.label.set_on_enter_press(command)
     }
 }

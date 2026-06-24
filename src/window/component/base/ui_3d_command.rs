@@ -9,11 +9,12 @@ use crate::window::component::{
 pub enum Ui3DCommand {
     RotateCamera(Cell<Option<u32>>, Cell<f32>, Cell<f32>),
     ChangeDistanceCamera(Cell<Option<u32>>, Cell<f32>, Cell<f32>),
-    AddSphere(Cell<Option<u32>>, Cell<f32>, Cell<f32>),
+    Paint(Cell<Option<u32>>, Cell<f32>, Cell<f32>),
+    ChangeUnionPencil(Cell<Option<u32>>, f32),
 }
 
 impl Ui3DCommand {
-    pub fn build(self) -> UiCommand {
+    fn build(self) -> UiCommand {
         let cmd: Rc<dyn CommandTrait> = Rc::new(self);
         UiCommand::Other(cmd)
     }
@@ -23,8 +24,11 @@ impl Ui3DCommand {
     pub fn change_distance_camera() -> UiCommand {
         Ui3DCommand::ChangeDistanceCamera(Cell::new(None), Cell::new(0.0), Cell::new(0.0)).build()
     }
-    pub fn add_sphere() -> UiCommand {
-        Ui3DCommand::AddSphere(Cell::new(None), Cell::new(0.0), Cell::new(0.0)).build()
+    pub fn paint() -> UiCommand {
+        Ui3DCommand::Paint(Cell::new(None), Cell::new(0.0), Cell::new(0.0)).build()
+    }
+    pub fn change_union_pencil(type_union: f32) -> UiCommand {
+        Ui3DCommand::ChangeUnionPencil(Cell::new(None), type_union).build()
     }
 }
 
@@ -33,7 +37,7 @@ impl CommandTrait for Ui3DCommand {
         match self {
             Ui3DCommand::RotateCamera(_, x, y)
             | Ui3DCommand::ChangeDistanceCamera(_, x, y)
-            | Ui3DCommand::AddSphere(_, x, y) => {
+            | Ui3DCommand::Paint(_, x, y) => {
                 x.set(mx);
                 y.set(my);
             }
@@ -44,7 +48,8 @@ impl CommandTrait for Ui3DCommand {
         match self {
             Ui3DCommand::RotateCamera(target, _, _)
             | Ui3DCommand::ChangeDistanceCamera(target, _, _)
-            | Ui3DCommand::AddSphere(target, _, _) => {
+            | Ui3DCommand::Paint(target, _, _)
+            | Ui3DCommand::ChangeUnionPencil(target, _) => {
                 if target.get().is_none() {
                     target.set(Some(*item));
                 }
@@ -59,7 +64,8 @@ impl CommandTrait for Ui3DCommand {
         match self {
             Ui3DCommand::RotateCamera(id, _, _)
             | Ui3DCommand::ChangeDistanceCamera(id, _, _)
-            | Ui3DCommand::AddSphere(id, _, _) => {
+            | Ui3DCommand::Paint(id, _, _)
+            | Ui3DCommand::ChangeUnionPencil(id, _) => {
                 let id = &id.get();
                 if let Some(el) = get_upgrade_by_id(id, id_manager) {
                     match self {
@@ -73,9 +79,14 @@ impl CommandTrait for Ui3DCommand {
                                 viewport.change_distance_camera(x.get(), y.get());
                             }
                         }
-                        Ui3DCommand::AddSphere(_, x, y) => {
+                        Ui3DCommand::Paint(_, x, y) => {
                             if let Some(viewport) = el.borrow_mut().as_viewport_control_mut() {
                                 viewport.add_sphere(x.get(), y.get());
+                            }
+                        }
+                        Ui3DCommand::ChangeUnionPencil(_, type_union) => {
+                            if let Some(viewport) = el.borrow_mut().as_paintful_mut() {
+                                viewport.change_union_pencil(*type_union);
                             }
                         }
                     }

@@ -22,7 +22,6 @@ use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
-use wgpu::RenderPassColorAttachment;
 use winit::application::ApplicationHandler;
 use winit::event::{KeyEvent, Modifiers, MouseScrollDelta, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
@@ -133,9 +132,6 @@ impl AppWinit {
     fn print(&mut self) {
         let now = Instant::now();
 
-        if now.duration_since(self.last_render).as_millis() < 8 {
-            return;
-        }
         self.last_render = now;
 
         let state = self.state.as_mut().unwrap();
@@ -155,8 +151,6 @@ impl AppWinit {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Создаем "записчик" команд
-
         if let (Some(window), Some(state)) = (&self.window, &mut self.state) {
             let window_size = window.inner_size();
             state.render(
@@ -170,20 +164,9 @@ impl AppWinit {
         println!("Время кадра: {:?}", duration);
 
         // Отправляем записанные команды на выполнение в видеокарту
-
         output.present();
 
         self.gpu_ctx.clear();
-
-        // Если надо включить постоянный режим отрисовки
-        // if self.edit_label_manager.is_editing() {
-        //     self.next_redraw = Some(Instant::now() + Duration::from_millis(500));
-        // } else {
-        //     self.next_redraw = None;
-        // }
-
-        // let duration = now.elapsed(); // Получаем длительность
-        // println!("Время кадра: {:?}", duration);
     }
 
     pub fn process_commands(&mut self) {
@@ -302,6 +285,42 @@ impl AppWinit {
             }
         }
     }
+
+    fn handle_move(&mut self) {
+        let mut need_redraw = false;
+
+        self.hover_manager.hover(
+            self.cursor_position.0,
+            self.cursor_position.1,
+            &self.id_manager,
+        );
+
+        if let Some(state) = self.state.as_mut() {
+            let layout_context = LayoutContext {
+                font: &state.text_vertex.atlas.font,
+                sdf_base_size: 64.0,
+            };
+            self.select_manager.select(
+                self.cursor_position.0,
+                self.cursor_position.1,
+                &layout_context,
+                &self.id_manager,
+            );
+            need_redraw = self.select_manager.in_run();
+        }
+
+        if !need_redraw {
+            let (mx, my) = self.cursor_position;
+
+            need_redraw = self.drag_manager.drag(mx, my, &self.id_manager);
+        }
+
+        if need_redraw {
+            if let Some(w) = &self.window {
+                w.request_redraw();
+            }
+        }
+    }
 }
 
 impl ApplicationHandler for AppWinit {
@@ -315,7 +334,7 @@ impl ApplicationHandler for AppWinit {
             ..Default::default()
         });
 
-        // Создаем Surface (холст окна) - требует 'static lifetime или Arc
+        //Surface (холст окна) - требует 'static lifetime или Arc
         let surface = instance.create_surface(window.clone()).unwrap();
 
         // Запрашиваем видеокарту (Адаптер)
@@ -389,39 +408,7 @@ impl ApplicationHandler for AppWinit {
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_position = (position.x as u16, position.y as u16);
 
-                let mut need_redraw = false;
-
-                self.hover_manager.hover(
-                    self.cursor_position.0,
-                    self.cursor_position.1,
-                    &self.id_manager,
-                );
-
-                if let Some(state) = self.state.as_mut() {
-                    let layout_context = LayoutContext {
-                        font: &state.text_vertex.atlas.font,
-                        sdf_base_size: 64.0,
-                    };
-                    self.select_manager.select(
-                        self.cursor_position.0,
-                        self.cursor_position.1,
-                        &layout_context,
-                        &self.id_manager,
-                    );
-                    need_redraw = self.select_manager.in_run();
-                }
-
-                if !need_redraw {
-                    let (mx, my) = self.cursor_position;
-
-                    need_redraw = self.drag_manager.drag(mx, my, &self.id_manager);
-                }
-
-                if need_redraw {
-                    if let Some(w) = &self.window {
-                        w.request_redraw();
-                    }
-                }
+                self.handle_move();
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if button == winit::event::MouseButton::Left
@@ -454,6 +441,46 @@ impl ApplicationHandler for AppWinit {
                     self.drag_manager.stop_drag(&self.id_manager);
                 }
             }
+            WindowEvent::Touch(touch) => {
+                let mx = touch.location.x;
+                let my = touch.location.y;
+
+                match touch.phase {
+                    winit::event::TouchPhase::Started => {
+                        // Код нажатия пальца (из предыдущего шага)
+                        self.cursor_position = (mx as u16, my as u16);
+
+                        if let Some(state) = self.state.as_ref() {
+                            let layout_context = LayoutContext {
+                                font: &state.text_vertex.atlas.font,
+                                sdf_base_size: 64.0,
+                            };
+                            self.select_manager.select_start(
+                                mx as u16,
+                                my as u16,
+                                &layout_context,
+                                &self.id_manager,
+                            );
+                        }
+                        self.edit_label_manager.stop_edit(&self.id_manager);
+                        self.drag_manager
+                            .drag_start(mx as u16, my as u16, &self.id_manager);
+                        self.button_manager
+                            .click(mx as u16, my as u16, &self.id_manager);
+                    }
+
+                    winit::event::TouchPhase::Moved => {
+                        self.cursor_position = (mx as u16, my as u16);
+                        self.handle_move();
+                    }
+
+                    winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled => {
+                        // Код отпускания пальца
+                        self.select_manager.stop_select();
+                        self.drag_manager.stop_drag(&self.id_manager);
+                    }
+                }
+            }
             WindowEvent::MouseWheel { delta, phase, .. } => {
                 let (scroll_amount_x, scroll_amount_y) = match delta {
                     MouseScrollDelta::LineDelta(x, y) => {
@@ -479,9 +506,6 @@ impl ApplicationHandler for AppWinit {
                         scroll_amount_y,
                         &self.id_manager,
                     ) {
-                        // if let Some(state) = self.state.as_mut() {
-                        //     state.text_vertex.section_hashes.fill(0);
-                        // }
                         if let Some(w) = &self.window {
                             w.request_redraw();
                         }
@@ -498,6 +522,12 @@ impl ApplicationHandler for AppWinit {
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let active_render: bool = false;
+
+        let target_fps = 1.0;
+        let frame_duration = Duration::from_secs_f64(1.0 / target_fps);
+        let now = Instant::now();
+
         let changed = self
             .animation_manager
             .update(&self.commands_tx, &self.id_manager);
@@ -505,21 +535,23 @@ impl ApplicationHandler for AppWinit {
         self.process_commands();
 
         if let Some(state) = self.state.as_mut() {
-            if !changed && state.text_vertex.last_defrag_time.elapsed() > Duration::from_secs(10) {
-                // if state.is_defrag_worth_it() {
-                //     state.perform_true_defragmentation();
-                //     state.text_vertex.last_defrag_time = Instant::now();
-
-                //     // После дефрагментации нужно один раз перерисовать,
-                //     // так как Indirect Buffer обновился
-                //     if let Some(window) = self.window.as_ref() {
-                //         window.request_redraw();
-                //     }
-                // }
-            }
+            if !changed && state.text_vertex.last_defrag_time.elapsed() > Duration::from_secs(10) {}
         }
 
-        let next_event = self.animation_manager.query_next_timeout();
+        if self.next_redraw.is_none() {
+            self.next_redraw = Some(now);
+        }
+
+        let mut frame_redraw_time = self.next_redraw.unwrap();
+
+        // Если время текущего кадра уже подошло или прошло
+        if now >= frame_redraw_time && active_render {
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            frame_redraw_time = now + frame_duration;
+            self.next_redraw = Some(frame_redraw_time);
+        }
 
         if changed {
             if let Some(window) = self.window.as_ref() {
@@ -527,17 +559,26 @@ impl ApplicationHandler for AppWinit {
             }
         }
 
-        match (next_event, self.next_redraw) {
-            (Some(anim_time), Some(redraw_time)) => {
+        let next_anim = self.animation_manager.query_next_timeout();
+
+        match (next_anim, Some(frame_redraw_time), active_render) {
+            (Some(anim_time), Some(redraw_time), true) => {
                 event_loop.set_control_flow(ControlFlow::WaitUntil(anim_time.min(redraw_time)));
             }
-            (Some(time), None) | (None, Some(time)) => {
+            (Some(anim_time), Some(_), false) => {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(anim_time));
+            }
+            (Some(time), None, _) | (None, Some(time), true) => {
                 event_loop.set_control_flow(ControlFlow::WaitUntil(time));
             }
-            (None, None) => {
+            (None, _, false) | (None, None, true) => {
                 event_loop.set_control_flow(ControlFlow::Wait);
             }
         }
+    }
+    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        self.state = None;
+        self.window = None;
     }
 }
 

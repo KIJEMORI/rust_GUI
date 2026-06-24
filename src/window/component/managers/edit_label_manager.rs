@@ -55,6 +55,12 @@ impl EditLabelManager {
                 if let Some(label) = e.as_edit_label_control_mut() {
                     if event.state.is_pressed() {
                         match event.logical_key {
+                            Key::Named(NamedKey::Enter) => {
+                                if let Some(keyboard_control) = e.as_keyboard_control_mut() {
+                                    keyboard_control.on_enter_press();
+                                    user_interacted = true;
+                                }
+                            }
                             Key::Named(NamedKey::Backspace) => {
                                 label.backspace();
                                 user_interacted = true;

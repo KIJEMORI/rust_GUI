@@ -1,6 +1,7 @@
 use crate::window::component::block_3d::{
     model::{model::SHAPE_TORUS, sdf_command::SDFCommandExt},
     transform::Transform,
+    type_union,
 };
 
 pub struct Tor {}
@@ -17,6 +18,7 @@ impl Tor {
             params: [SHAPE_TORUS, size1, size2, 0.0],
             color: 0xFF555555,
             material_id: 0,
+            type_union: type_union::SMOOTH,
         }
     }
 }

@@ -188,34 +188,37 @@ impl WgpuState {
             .features()
             .contains(wgpu::Features::MULTI_DRAW_INDIRECT);
 
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Compute Encoder"),
-            });
-
         if gpu_ctx.bake_cmds.len() > 0 {
             #[cfg(feature = "3d_render")]
             {
-                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-                cpass.set_pipeline(&self.brick_manager.baking_pipeline);
-                cpass.set_bind_group(0, &self.brick_manager.bind_group_for_baking, &[]);
-                // Запускаем ровно столько групп, сколько у нас кирпичей на запекание
-                println!("Bake commands count: {}", gpu_ctx.bake_cmds.len());
-                cpass.dispatch_workgroups(gpu_ctx.bake_cmds.len() as u32, 1, 1);
+                let mut compute_encoder =
+                    self.device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("Bake Compute Encoder"),
+                        });
+
+                {
+                    let mut cpass =
+                        compute_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+                    cpass.set_pipeline(&self.brick_manager.baking_pipeline);
+                    cpass.set_bind_group(0, &self.brick_manager.bind_group_for_baking, &[]);
+                    println!("Bake commands count: {}", gpu_ctx.bake_cmds.len());
+                    cpass.dispatch_workgroups(gpu_ctx.bake_cmds.len() as u32, 1, 1);
+                }
+
+                self.queue.submit(std::iter::once(compute_encoder.finish()));
             }
-            // #[cfg(feature = "3d_render")]
-            // {
-            //     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-            //     cpass.set_pipeline(&self.brick_manager.lighting_pipeline);
-            //     cpass.set_bind_group(0, &self.brick_manager.bind_group_for_lighting, &[]);
-            //     cpass.dispatch_workgroups(gpu_ctx.bake_cmds.len() as u32, 1, 1);
-            // }
         }
+
+        let mut render_encoder =
+            self.device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Render Encoder"),
+                });
 
         {
             // Начинаем проход отрисовки (Render Pass)
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut render_pass = render_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 color_attachments: &[Some(RenderPassColorAttachment {
                     view: view,
                     resolve_target: None,
@@ -371,7 +374,7 @@ impl WgpuState {
             }
         }
 
-        self.queue.submit(std::iter::once(encoder.finish()));
+        self.queue.submit(std::iter::once(render_encoder.finish()));
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {

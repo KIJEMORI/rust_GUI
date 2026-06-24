@@ -8,17 +8,21 @@ use crate::{
                 area::Area, base::Base, component_type::SharedDrawable,
                 gpu_render_context::GpuRenderContext, settings::Settings, ui_command::CommandTrait,
             },
-            block_3d::model::{
-                math::{cast_ray, get_mouse_ray},
-                model::Model,
-                sdf_command::SDFCommandExt,
-                sphere::Sphere,
+            block_3d::{
+                model::{
+                    math::{cast_ray, get_mouse_ray},
+                    model::Model,
+                    sdf_command::SDFCommandExt,
+                    sphere::Sphere,
+                },
+                pencil_3d::Pencil3D,
             },
             interface::{
                 component_control::{ComponentControl, ComponentControlExt, PanelControl},
                 drawable::{
                     AnimationDrawable, ClickableDrawable, DragableDrawable, Drawable,
-                    HoverableDrawable, InternalAccess, LayoutDrawable, ScrollableDrawable,
+                    HoverableDrawable, InternalAccess, LayoutDrawable, PaintfulDrawable3D,
+                    ScrollableDrawable,
                 },
                 drawable_3d::ViewportControl,
                 layout::Layout,
@@ -41,6 +45,7 @@ pub struct Viewport3D {
     pub camera: CameraUniform,
     pub orbit_controller: OrbitCamera,
     pub scrollable: bool,
+    pub pencil: Pencil3D,
 }
 
 impl Viewport3D {
@@ -75,6 +80,7 @@ impl Viewport3D {
             camera,
             orbit_controller: orbit,
             scrollable: false,
+            pencil: Pencil3D::default(),
         }
     }
 
@@ -170,11 +176,7 @@ impl Drawable for Viewport3D {
             let (bake_cmds, instance_cmds, need_render) = self.model.render();
 
             if need_render {
-                if let Some(tx) = &self.panel.base.settings.command_tx {
-                    let _ = tx.send(
-                        crate::window::component::base::ui_command::UiCommand::RequestRedraw(),
-                    );
-                }
+                self.redraw();
             }
 
             ctx.push_bake_commands(
@@ -193,6 +195,10 @@ impl Drawable for Viewport3D {
         let rect = self.panel.resize(area, ctx, auto_size);
 
         return rect;
+    }
+
+    fn redraw(&self) {
+        self.panel.redraw();
     }
 
     fn get_managers<'a>(
@@ -293,6 +299,13 @@ impl Drawable for Viewport3D {
     fn as_viewport_control_mut(&mut self) -> Option<&mut dyn ViewportControl> {
         Some(self)
     }
+
+    fn as_paintful(&self) -> Option<&dyn PaintfulDrawable3D> {
+        Some(self)
+    }
+    fn as_paintful_mut(&mut self) -> Option<&mut dyn PaintfulDrawable3D> {
+        Some(self)
+    }
 }
 
 impl ComponentControl for Viewport3D {
@@ -369,7 +382,10 @@ impl ViewportControl for Viewport3D {
 
             let spawn_pos = hit_pos;
 
-            let new_command = Sphere::new(sphere_radius, spawn_pos.to_array());
+            let mut new_command = Sphere::new(sphere_radius, spawn_pos.to_array());
+
+            new_command.color = self.pencil.color;
+            new_command.type_union = self.pencil.type_union;
 
             self.add_model(new_command);
         }
@@ -405,5 +421,16 @@ impl ScrollableDrawable for Viewport3D {
             }
         }
         true
+    }
+}
+
+impl PaintfulDrawable3D for Viewport3D {
+    fn change_union_pencil(&mut self, type_union: f32) -> &mut dyn PaintfulDrawable3D {
+        self.pencil.type_union = type_union;
+        self
+    }
+    fn change_color_pencil(&mut self, color: u32) -> &mut dyn PaintfulDrawable3D {
+        self.pencil.color = color;
+        self
     }
 }

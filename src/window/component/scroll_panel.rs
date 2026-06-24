@@ -19,8 +19,8 @@ use crate::{
             component_control::{ComponentControl, ComponentControlExt, PanelControl},
             drawable::{
                 AnimationDrawable, ClickableDrawable, DragableDrawable, Drawable,
-                HoverableDrawable, InternalAccess, LayoutDrawable, ScrollableDrawable,
-                SelectableDrawable,
+                HoverableDrawable, InternalAccess, KeyboardControlDrawable, LayoutDrawable,
+                ScrollableDrawable, SelectableDrawable,
             },
             layout::Layout,
         },
@@ -343,6 +343,10 @@ impl Drawable for ScrollPanel {
         return rect;
     }
 
+    fn redraw(&self) {
+        self.panel.redraw();
+    }
+
     fn get_managers<'a>(
         &'a self,
         button_manager: &mut ButtonManager,
@@ -480,6 +484,12 @@ impl Drawable for ScrollPanel {
     fn as_dragable_mut(&mut self) -> Option<&mut dyn DragableDrawable> {
         self.panel.as_dragable_mut()
     }
+    fn as_keyboard_control(&self) -> Option<&dyn KeyboardControlDrawable> {
+        Some(self)
+    }
+    fn as_keyboard_control_mut(&mut self) -> Option<&mut dyn KeyboardControlDrawable> {
+        Some(self)
+    }
 }
 
 impl ComponentControl for ScrollPanel {
@@ -503,5 +513,17 @@ impl ComponentControl for ScrollPanel {
 impl ComponentControlExt for ScrollPanel {
     fn add<T: Drawable + 'static>(&mut self, item: T) -> SharedDrawable {
         self.panel.add(item)
+    }
+}
+
+impl KeyboardControlDrawable for ScrollPanel {
+    fn is_keyboard_control(&self) -> bool {
+        self.panel.is_keyboard_control()
+    }
+    fn on_enter_press(&mut self) {
+        self.panel.on_enter_press();
+    }
+    fn set_on_enter_press(&mut self, command: UiCommand) -> &mut dyn KeyboardControlDrawable {
+        self.panel.set_on_enter_press(command)
     }
 }

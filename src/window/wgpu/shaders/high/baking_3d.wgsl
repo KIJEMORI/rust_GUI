@@ -10,7 +10,7 @@ struct Instance3DData {
     params: vec4<f32>,
     color: u32,
     material_id: u32,
-    pad0: u32,
+    type_union: f32,
     pad1: u32,
 }
 
@@ -92,6 +92,7 @@ fn cs_main(
         var res = 10.0; // Общая честная дистанция для всего
         var final_color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
         var has_color = false;
+        var current_mat_id = u32(0);
 
         for (var i = 0u; i < task.count; i++) {
             let inst = instances[task.start_instance + i];
@@ -111,33 +112,47 @@ fn cs_main(
             let base_color = unpack_color_unorm(inst.color);
             let mat_id = inst.material_id;
 
-            // Всегда берем минимальную дистанцию (smin)
             if !has_color {
                 res = d;
-                // Записываем цвет и закладываем ID материала в альфу для фрагментного шейдера
-                let mat_norm = f32(mat_id) / 255.0;
-                final_color = vec4<f32>(base_color.rgb, mat_norm);
+                current_mat_id = u32(mat_id);
+                final_color = base_color;
                 has_color = true;
             } else {
                 let h = clamp(0.5 + 0.5 * (res - d) / k, 0.0, 1.0);
-                res = smin(res, d, k);
 
-                // Если это стекло, мы не даем ему полностью перетереть цвет непрозрачного объекта
-                var mix_color = base_color.rgb;
-                if mat_id == 1u {
-                    mix_color = mix(final_color.rgb, base_color.rgb, 0.45);
-                } else {
-                    mix_color = mix(final_color.rgb, base_color.rgb, h);
+                let type_union = inst.type_union;
+
+                let old_res = res;
+
+                if type_union < 0.5 { // UNION
+                    res = min(res, d);
+                    if d < old_res {
+                        current_mat_id = mat_id;
+                        final_color = mix(final_color.rgba, base_color.rgba, h);
+                    }
+                }
+                else if type_union < 1.5 { // INTERSECTION
+                    res = max(res, d);
+                    final_color = base_color;
+                    if d > old_res { current_mat_id = mat_id; }
+                }
+                else if type_union < 2.5 { // SUBTRACTION
+                    res = max(res, -d);
+                    if -d > old_res { current_mat_id = mat_id; }
+                }
+                else if type_union < 3.5 { // SMOOTH
+                    res = smin(res, d, k);
+                    final_color = mix(final_color.rgba, base_color.rgba, h);
+                    if h > 0.5 { current_mat_id = mat_id; }
+                }
+                else if type_union < 4.5 { // COLOR_DRAWING
+                    final_color = mix(final_color.rgba, base_color.rgba, h);
+                    if h > 0.5 { current_mat_id = mat_id; }
                 }
 
-                // Сохраняем ID того материала, который оказался ближе
-                var current_mat_id = mat_id;
-                if res < d {
-                    current_mat_id = u32(final_color.a * 255.0 + 0.5);
-                }
-
-                let mat_norm = f32(current_mat_id) / 255.0;
-                final_color = vec4<f32>(mix_color, mat_norm);
+                //     if mat_id == 1u {
+                //         mix_color = mix(final_color.rgba, base_color.rgba, 0.45);
+                //     }
             }
         }
 
@@ -147,6 +162,6 @@ fn cs_main(
 
         // Пишем чистый f32 в R-канал (никакой упаковки pack2x16 не нужно!)
         textureStore(atlas_sdf, uv, vec4<f32>(res, 0.0, 0.0, 0.0));
-        textureStore(atlas_color, uv, final_color);
+        textureStore(atlas_color, uv, vec4<f32>(final_color.rgba));
     }
 }

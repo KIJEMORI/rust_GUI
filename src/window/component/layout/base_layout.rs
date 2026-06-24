@@ -108,10 +108,11 @@ impl Layout for BaseLayout {
     fn padding_area(&self, area: &Area) -> Area {
         let x1 = self.padding.left as f32;
         let y1 = self.padding.up as f32;
+
         let x2 = area.min.get_width() as f32 - self.padding.right as f32;
         let y2 = area.min.get_height() as f32 - self.padding.down as f32;
 
-        Area::new_from_coord((x1, y1), (x2, y2))
+        Area::new(x1, y1, x2 as u16, y2 as u16)
     }
     fn next(&self, _area: &Area, parent_area: &Area, _margin: Direction) -> (Area, bool) {
         (

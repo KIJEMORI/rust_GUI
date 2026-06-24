@@ -15,8 +15,8 @@ use crate::{
         interface::{
             component_control::{FullEditControl, LabelControl, PanelControl},
             drawable::{
-                AnimationDrawable, ClickableDrawable, Drawable, HoverableDrawable, LayoutDrawable,
-                ScrollableDrawable, SelectableDrawable,
+                AnimationDrawable, ClickableDrawable, Drawable, HoverableDrawable,
+                KeyboardControlDrawable, LayoutDrawable, ScrollableDrawable, SelectableDrawable,
             },
         },
         label::Label,
@@ -102,6 +102,10 @@ impl Drawable for EditLabel {
         self.label.resize_one(ctx);
     }
 
+    fn redraw(&self) {
+        self.label.redraw();
+    }
+
     add_drawable_control!();
 
     fn set_default_settings(
@@ -128,6 +132,9 @@ impl Drawable for EditLabel {
         self.label.as_layout_control_mut()
     }
 
+    fn as_label_control(&self) -> Option<&dyn LabelControl> {
+        self.label.as_label_control()
+    }
     fn as_label_control_mut(&mut self) -> Option<&mut dyn LabelControl> {
         self.label.as_label_control_mut()
     }
@@ -174,5 +181,23 @@ impl Drawable for EditLabel {
     }
     fn as_scrollable_mut(&mut self) -> Option<&mut dyn ScrollableDrawable> {
         self.label.as_scrollable_mut()
+    }
+    fn as_keyboard_control(&self) -> Option<&dyn KeyboardControlDrawable> {
+        Some(self)
+    }
+    fn as_keyboard_control_mut(&mut self) -> Option<&mut dyn KeyboardControlDrawable> {
+        Some(self)
+    }
+}
+
+impl KeyboardControlDrawable for EditLabel {
+    fn is_keyboard_control(&self) -> bool {
+        self.label.is_keyboard_control()
+    }
+    fn on_enter_press(&mut self) {
+        self.label.on_enter_press();
+    }
+    fn set_on_enter_press(&mut self, command: UiCommand) -> &mut dyn KeyboardControlDrawable {
+        self.label.set_on_enter_press(command)
     }
 }

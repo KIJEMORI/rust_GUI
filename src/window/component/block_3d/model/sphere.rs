@@ -1,6 +1,7 @@
 use crate::window::component::block_3d::{
     model::{model::SHAPE_SPHERE, sdf_command::SDFCommandExt},
     transform::Transform,
+    type_union,
 };
 
 pub struct Sphere {}
@@ -17,6 +18,7 @@ impl Sphere {
             params: [SHAPE_SPHERE, radius, 0.0, 0.0],
             color: 0xFF555555,
             material_id: 0,
+            type_union: type_union::SMOOTH,
         }
     }
     pub fn new_with_color(radius: f32, position: [f32; 3], color: u32) -> SDFCommandExt {
@@ -30,6 +32,7 @@ impl Sphere {
             params: [SHAPE_SPHERE, radius, 0.0, 0.0],
             color: color,
             material_id: 0,
+            type_union: type_union::SMOOTH,
         }
     }
 }

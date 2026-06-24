@@ -21,6 +21,7 @@ pub trait ComponentControlExt {
 #[allow(dead_code)]
 pub trait PanelControl {
     fn set_background(&mut self, color: u32) -> &mut dyn PanelControl;
+    fn get_background(&self) -> u32;
     fn set_position(&mut self, x: f32, y: f32) -> &mut dyn PanelControl;
     fn set_height(&mut self, h: u16) -> &mut dyn PanelControl;
     fn set_width(&mut self, w: u16) -> &mut dyn PanelControl;
@@ -30,16 +31,17 @@ pub trait PanelControl {
 
 #[allow(dead_code)]
 pub trait LabelControl {
-    fn set_font(&mut self, family_name: &'static str);
-    fn set_font_color(&mut self, color: u32);
+    fn set_font(&mut self, family_name: &'static str) -> &mut dyn LabelControl;
+    fn set_font_color(&mut self, color: u32) -> &mut dyn LabelControl;
     fn get_font_color(&self) -> u32;
-    fn set_text(&mut self, text: String);
+    fn set_text(&mut self, text: String) -> &mut dyn LabelControl;
     fn get_text(&self) -> &str;
-    fn set_text_str(&mut self, text: &str);
-    fn set_scale(&mut self, scale: u16);
+    fn set_text_str(&mut self, text: &str) -> &mut dyn LabelControl;
+    fn set_scale(&mut self, scale: u16) -> &mut dyn LabelControl;
     fn set_start_caret(&mut self, select_start: (u16, u16), ctx: &LayoutContext);
     fn set_end_caret(&mut self, select_end: (u16, u16), ctx: &LayoutContext) -> bool;
     fn remove_select(&mut self);
+    fn fit_to_content(&mut self, tumbler: bool) -> &mut dyn LabelControl;
 }
 
 #[allow(dead_code)]

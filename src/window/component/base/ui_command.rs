@@ -35,11 +35,17 @@ pub enum UiCommand {
     Batch(Vec<UiCommand>),
     Other(Rc<dyn CommandTrait>),
     DragItem(Cell<Option<u32>>),
+    RefCommand(SharedDrawable, Box<UiCommand>),
 }
 
 impl CommandTrait for UiCommand {
     fn fill_coord(&self, mx: f32, my: f32) {
         match self {
+            UiCommand::Batch(cmds) => {
+                for c in cmds {
+                    c.fill_coord(mx, my);
+                }
+            }
             UiCommand::ScrollPanel(_, x, y) => {
                 x.set(-mx * x.get());
                 y.set(-my * y.get());
@@ -49,6 +55,9 @@ impl CommandTrait for UiCommand {
                 y.set(my);
             }
             UiCommand::Other(obj) => {
+                obj.fill_coord(mx, my);
+            }
+            UiCommand::RefCommand(_, obj) => {
                 obj.fill_coord(mx, my);
             }
             _ => (),
@@ -80,6 +89,9 @@ impl CommandTrait for UiCommand {
             }
             UiCommand::Other(obj) => {
                 obj.fill_ref(item);
+            }
+            UiCommand::RefCommand(ref_target, obj) => {
+                obj.fill_ref(&ref_target.borrow().as_base().id);
             }
             _ => (),
         }
@@ -183,6 +195,9 @@ impl CommandTrait for UiCommand {
                 }
             }
             UiCommand::Other(obj) => {
+                obj.execute_command(id_manager);
+            }
+            UiCommand::RefCommand(_, obj) => {
                 obj.execute_command(id_manager);
             }
             _ => (),

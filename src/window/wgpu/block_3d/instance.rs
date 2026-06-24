@@ -9,7 +9,8 @@ pub struct Instance3DData {
     pub params: [f32; 4],         // 16 байт (выровнено по 16)
     pub color: u32,               // 4 байта
     pub material_id: u32,         // 4 байта
-    pub _padding: [u32; 2],       // 8 байт (4*2)
+    pub type_union: f32,          // 4 байта
+    pub _padding: u32,            // 4 байта
 }
 
 pub struct GPUInstance3DData {

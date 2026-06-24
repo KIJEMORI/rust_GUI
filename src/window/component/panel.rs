@@ -16,7 +16,7 @@ use crate::window::component::interface::component_control::{
 use crate::window::component::interface::const_layout::ConstLayout;
 use crate::window::component::interface::drawable::{
     AnimationDrawable, ClickableDrawable, DragableDrawable, Drawable, HoverableDrawable,
-    InternalAccess, LayoutDrawable, ScrollableDrawable,
+    InternalAccess, KeyboardControlDrawable, LayoutDrawable, ScrollableDrawable,
 };
 use crate::window::component::interface::layout::Layout;
 use crate::window::component::layout::base_layout::{Align, BaseLayout};
@@ -48,6 +48,7 @@ pub struct Panel {
     drag_rails: DragRails,
     animation: Vec<AnimationSequence>,
     pub border: Border,
+    on_enter: Option<UiCommand>,
 }
 
 #[allow(dead_code)]
@@ -92,6 +93,7 @@ impl Default for Panel {
             drag_rails: DragRails::None,
             animation: Vec::new(),
             border: Border::default(),
+            on_enter: None,
         }
     }
 }
@@ -566,6 +568,13 @@ impl Drawable for Panel {
 
         return self.base.rect.clone();
     }
+
+    fn redraw(&self) {
+        if let Some(tx) = &self.base.settings.command_tx {
+            let _ = tx.send(UiCommand::RequestRedraw());
+        }
+    }
+
     fn get_managers<'a>(
         &'a self,
         button_manager: &mut ButtonManager,
@@ -707,6 +716,13 @@ impl Drawable for Panel {
     fn as_dragable_mut(&mut self) -> Option<&mut dyn DragableDrawable> {
         Some(self)
     }
+
+    fn as_keyboard_control(&self) -> Option<&dyn KeyboardControlDrawable> {
+        Some(self)
+    }
+    fn as_keyboard_control_mut(&mut self) -> Option<&mut dyn KeyboardControlDrawable> {
+        Some(self)
+    }
 }
 
 impl ComponentControl for Panel {
@@ -770,6 +786,9 @@ impl PanelControl for Panel {
         self.base.settings.background_color = color;
         self
     }
+    fn get_background(&self) -> u32 {
+        self.base.settings.background_color
+    }
     fn set_position(&mut self, x: f32, y: f32) -> &mut dyn PanelControl {
         self.base.set_position(x, y);
         self
@@ -794,5 +813,26 @@ impl PanelControl for Panel {
             rect.set_position(x1, y1);
         }
         rect
+    }
+}
+
+impl KeyboardControlDrawable for Panel {
+    fn is_keyboard_control(&self) -> bool {
+        true
+    }
+    fn on_enter_press(&mut self) {
+        if let Some(cmd) = &self.on_enter {
+            let command_to_send = cmd.clone();
+
+            command_to_send.fill_ref(&self.base.id);
+
+            if let Some(tx) = &self.base.settings.command_tx {
+                let _ = tx.send(command_to_send);
+            }
+        }
+    }
+    fn set_on_enter_press(&mut self, command: UiCommand) -> &mut dyn KeyboardControlDrawable {
+        self.on_enter = Some(command);
+        self
     }
 }

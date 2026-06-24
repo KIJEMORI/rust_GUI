@@ -3,13 +3,16 @@ use std::any::Any;
 use crate::window::component::animation::animation_action::AnimationSequence;
 use crate::window::component::base::area::Area;
 use crate::window::component::base::base::Base;
-
-use crate::window::component::base::component_type::SharedDrawable;
 use crate::window::component::base::gpu_render_context::GpuRenderContext;
-use crate::window::component::base::scroll::Scroll;
 use crate::window::component::base::settings::Settings;
 use crate::window::component::base::ui_command::UiCommand;
+use crate::window::component::interface::component_control::{
+    ComponentControl, FullEditControl, LabelControl, PanelControl,
+};
+use crate::window::component::interface::const_layout::ConstLayout;
 use crate::window::component::interface::drawable_3d::ViewportControl;
+use crate::window::component::layout::const_base_layout::Direction;
+use crate::window::component::layout::layout_context::LayoutContext;
 use crate::window::component::managers::atlas_manager::AtlasManager;
 use crate::window::component::managers::button_manager::ButtonManager;
 use crate::window::component::managers::drag_manager::{DragManager, DragRails};
@@ -17,13 +20,6 @@ use crate::window::component::managers::hover_manager::HoverManager;
 use crate::window::component::managers::id_manager::IDManager;
 use crate::window::component::managers::scroll_manager::ScrollManager;
 use crate::window::component::managers::select_manager::SelectManager;
-
-use crate::window::component::interface::component_control::{
-    ComponentControl, FullEditControl, LabelControl, PanelControl,
-};
-use crate::window::component::interface::const_layout::ConstLayout;
-use crate::window::component::layout::const_base_layout::Direction;
-use crate::window::component::layout::layout_context::LayoutContext;
 
 pub struct InternalAccess(pub(crate) ());
 
@@ -97,6 +93,18 @@ pub trait DragableDrawable {
     fn set_on_drop(&mut self, command: UiCommand) -> &mut dyn DragableDrawable;
 }
 
+pub trait KeyboardControlDrawable {
+    fn is_keyboard_control(&self) -> bool;
+    fn set_on_enter_press(&mut self, command: UiCommand) -> &mut dyn KeyboardControlDrawable;
+    fn on_enter_press(&mut self);
+}
+
+#[cfg(feature = "3d_render")]
+pub trait PaintfulDrawable3D {
+    fn change_union_pencil(&mut self, type_union: f32) -> &mut dyn PaintfulDrawable3D;
+    fn change_color_pencil(&mut self, color: u32) -> &mut dyn PaintfulDrawable3D;
+}
+
 #[allow(dead_code)]
 pub trait Drawable: Any {
     fn print(
@@ -109,6 +117,8 @@ pub trait Drawable: Any {
     );
 
     fn resize(&mut self, area: &Area, ctx: &LayoutContext, auto_size: bool) -> Area;
+
+    fn redraw(&self);
 
     fn resize_one(&mut self, ctx: &LayoutContext) {}
 
@@ -200,12 +210,28 @@ pub trait Drawable: Any {
         None
     }
 
+    fn as_keyboard_control(&self) -> Option<&dyn KeyboardControlDrawable> {
+        None
+    }
+    fn as_keyboard_control_mut(&mut self) -> Option<&mut dyn KeyboardControlDrawable> {
+        None
+    }
+
     #[cfg(feature = "3d_render")]
     fn as_viewport_control(&self) -> Option<&dyn ViewportControl> {
         None
     }
     #[cfg(feature = "3d_render")]
     fn as_viewport_control_mut(&mut self) -> Option<&mut dyn ViewportControl> {
+        None
+    }
+
+    #[cfg(feature = "3d_render")]
+    fn as_paintful(&self) -> Option<&dyn PaintfulDrawable3D> {
+        None
+    }
+    #[cfg(feature = "3d_render")]
+    fn as_paintful_mut(&mut self) -> Option<&mut dyn PaintfulDrawable3D> {
         None
     }
 }

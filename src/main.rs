@@ -15,6 +15,8 @@ use crate::window::component::block_3d::model::sphere::Sphere;
 #[cfg(feature = "3d_render")]
 use crate::window::component::block_3d::model::tor::Tor;
 #[cfg(feature = "3d_render")]
+use crate::window::component::block_3d::type_union;
+#[cfg(feature = "3d_render")]
 use crate::window::component::block_3d::viewport::Viewport3D;
 use crate::window::component::button::Button;
 use crate::window::component::edit_label::EditLabel;
@@ -22,6 +24,8 @@ use crate::window::component::interface::component_control::{ComponentControlExt
 use crate::window::component::interface::const_layout::ConstLayout;
 use crate::window::component::interface::drawable::Drawable;
 use crate::window::component::label::Label;
+#[cfg(feature = "3d_render")]
+use crate::window::component::layout::column_layout::ColumnLayout;
 use crate::window::component::layout::const_base_layout::{ConstBaseLayout, Direction};
 use crate::window::component::layout::row_layout::RowLayout;
 use crate::window::component::panel::Panel;
@@ -221,7 +225,7 @@ fn main_1() {
 }
 
 #[cfg(feature = "3d_render")]
-fn main_2() {
+pub fn main_2() {
     let mut app = App::new();
     let layout = RowLayout::new();
     app.set_layout(layout);
@@ -251,55 +255,467 @@ fn main_2() {
     panel
         .as_clickable_mut()
         .unwrap()
-        .set_on_click(Ui3DCommand::add_sphere());
+        .set_on_click(Ui3DCommand::paint());
 
     let mut c = ConstBaseLayout::new();
-    c.set_relative_width(90);
+    c.set_relative_width(100);
     c.set_relative_height(90);
     panel
         .as_layout_control_mut()
         .set_const_layout(Some(Box::new(c)));
 
-    // for i in 0..100 {
-    //     for j in 0..100 {
-    //         panel.add_model(Cube::new(
-    //             1.0,
-    //             [
-    //                 -100.0 / 2.0 + 1.5 * i as f32,
-    //                 100.0 / 2.0 - 1.5 * j as f32,
-    //                 0.0,
-    //             ],
-    //         ));
-    //     }
-    // }
+    // panel.add_model(Sphere::new_with_color(2.0, [0.0, -1.0, 0.0], 0xFFFF0000));
+    // panel.add_model(Sphere::new_with_color(2.0, [0.0, 1.0, 0.0], 0xFF0000FF));
 
-    //panel.add_model(Cube::new(3.0, [0.0, 0.0, 0.0]));
+    panel.add_model(Sphere::new_with_color(2.0, [0.0, 0.0, 0.0], 0xFF555555));
 
-    panel.add_model(Sphere::new_with_color(2.0, [0.0, 0.0, -1.0], 0xFF550000));
+    //panel.add_model(Sphere::new_with_color(2.0, [7.0, 0.0, 0.0], 0xFFFF5555));
 
-    panel.add_model(Sphere::new_with_color(2.0, [0.0, 0.0, 1.0], 0xFF000055));
+    let panel = app.add(panel);
 
-    //panel.add_model(Sphere::new_with_color(2.0, [0.0, 0.0, 0.0], 0xFF555555));
+    let mut control_panel = Panel::default();
+    control_panel.set_layout(ColumnLayout::new());
+    let mut c = ConstBaseLayout::new();
+    c.set_relative_width(100);
+    c.set_relative_height(50);
+    control_panel
+        .as_layout_control_mut()
+        .set_const_layout(Some(Box::new(c)));
 
-    //panel.add_model(Tor::new(2.0, 0.5, [0.0, 0.0, 0.0]));
+    let mut union_button = Label::new("Объединение".to_string());
+    union_button
+        .as_panel_control_mut()
+        .set_height(40)
+        .set_width(400)
+        .set_background(0xFF999999);
+    union_button.set_font_color(0xFF000000);
+    union_button.as_layout_control_mut().set_padding(Direction {
+        up: 2,
+        down: 2,
+        right: 2,
+        left: 2,
+    });
 
-    app.add(panel);
+    union_button
+        .as_clickable_mut()
+        .unwrap()
+        .set_on_click(UiCommand::RefCommand(
+            Rc::clone(&panel),
+            Box::new(Ui3DCommand::change_union_pencil(type_union::UNION)),
+        ));
 
-    // let mut label2 = Label::new("Настройки".to_string());
-    // label2
-    //     .as_panel_control_mut()
-    //     .set_height(40)
-    //     .set_width(400)
-    //     .set_background(0xFFFF0000);
-    // label2.set_font_color(0xFF000000);
+    control_panel.add(union_button);
 
-    // app.add(label2);
+    let mut subtraction_button = Label::new("Вычитание".to_string());
+    subtraction_button
+        .as_panel_control_mut()
+        .set_height(40)
+        .set_width(400)
+        .set_background(0xFF999999);
+    subtraction_button.set_font_color(0xFF000000);
+    subtraction_button
+        .as_layout_control_mut()
+        .set_padding(Direction {
+            up: 2,
+            down: 2,
+            right: 2,
+            left: 2,
+        })
+        .set_margin(Direction {
+            up: 0,
+            down: 0,
+            right: 0,
+            left: 5,
+        });
+
+    subtraction_button
+        .as_clickable_mut()
+        .unwrap()
+        .set_on_click(UiCommand::RefCommand(
+            Rc::clone(&panel),
+            Box::new(Ui3DCommand::change_union_pencil(type_union::SUBTRACTION)),
+        ));
+
+    control_panel.add(subtraction_button);
+
+    let mut smooth_button = Label::new("Плавное объединение".to_string());
+    smooth_button
+        .as_panel_control_mut()
+        .set_height(40)
+        .set_width(400)
+        .set_background(0xFF999999);
+    smooth_button.set_font_color(0xFF000000);
+    smooth_button
+        .as_layout_control_mut()
+        .set_padding(Direction {
+            up: 2,
+            down: 2,
+            right: 2,
+            left: 2,
+        })
+        .set_margin(Direction {
+            up: 0,
+            down: 0,
+            right: 0,
+            left: 5,
+        });
+
+    smooth_button
+        .as_clickable_mut()
+        .unwrap()
+        .set_on_click(UiCommand::RefCommand(
+            Rc::clone(&panel),
+            Box::new(Ui3DCommand::change_union_pencil(type_union::SMOOTH)),
+        ));
+
+    control_panel.add(smooth_button);
+
+    let mut drawing_button = Label::new("Рисование цветом".to_string());
+    drawing_button
+        .as_panel_control_mut()
+        .set_height(40)
+        .set_width(400)
+        .set_background(0xFF999999);
+    drawing_button.set_font_color(0xFF000000);
+    drawing_button
+        .as_layout_control_mut()
+        .set_padding(Direction {
+            up: 2,
+            down: 2,
+            right: 2,
+            left: 2,
+        })
+        .set_margin(Direction {
+            up: 0,
+            down: 0,
+            right: 0,
+            left: 5,
+        });
+
+    drawing_button
+        .as_clickable_mut()
+        .unwrap()
+        .set_on_click(UiCommand::RefCommand(
+            Rc::clone(&panel),
+            Box::new(Ui3DCommand::change_union_pencil(type_union::COLOR_DRAWING)),
+        ));
+
+    control_panel.add(drawing_button);
+
+    app.add(control_panel);
+
+    let mut color_panel = Panel::default();
+    color_panel.set_layout(ColumnLayout::new());
+    let mut c = ConstBaseLayout::new();
+    c.set_relative_width(100);
+    c.set_relative_height(100);
+    color_panel
+        .as_layout_control_mut()
+        .set_const_layout(Some(Box::new(c)));
+
+    let mut label = Label::new("R:".to_string());
+    label
+        .as_panel_control_mut()
+        .set_height(40)
+        .set_width(400)
+        .set_background(0x00999999);
+    label.set_font_color(0xFF000000);
+    label
+        .as_layout_control_mut()
+        .set_padding(Direction {
+            up: 2,
+            down: 2,
+            right: 2,
+            left: 2,
+        })
+        .set_margin(Direction {
+            up: 0,
+            down: 0,
+            right: 0,
+            left: 0,
+        });
+
+    color_panel.add(label);
+
+    let mut r_color = EditLabel::new("85");
+    r_color
+        .as_panel_control_mut()
+        .set_height(40)
+        .set_width(50)
+        .set_background(0xFF000000);
+    r_color
+        .as_label_control_mut()
+        .unwrap()
+        .set_font_color(0xFFFFFFFF)
+        .fit_to_content(false);
+    r_color
+        .as_layout_control_mut()
+        .set_padding(Direction {
+            up: 2,
+            down: 2,
+            right: 2,
+            left: 2,
+        })
+        .set_margin(Direction {
+            up: 0,
+            down: 0,
+            right: 0,
+            left: 0,
+        });
+
+    let r_color = color_panel.add(r_color);
+
+    let mut label = Label::new("G:".to_string());
+    label
+        .as_panel_control_mut()
+        .set_height(40)
+        .set_width(400)
+        .set_background(0x00999999);
+    label.set_font_color(0xFF000000);
+    label
+        .as_layout_control_mut()
+        .set_padding(Direction {
+            up: 2,
+            down: 2,
+            right: 2,
+            left: 2,
+        })
+        .set_margin(Direction {
+            up: 0,
+            down: 0,
+            right: 0,
+            left: 0,
+        });
+
+    color_panel.add(label);
+
+    let mut g_color = EditLabel::new("85");
+    g_color
+        .as_panel_control_mut()
+        .set_height(40)
+        .set_width(50)
+        .set_background(0xFF000000);
+    g_color
+        .as_label_control_mut()
+        .unwrap()
+        .set_font_color(0xFFFFFFFF)
+        .fit_to_content(false);
+    g_color
+        .as_layout_control_mut()
+        .set_padding(Direction {
+            up: 2,
+            down: 2,
+            right: 2,
+            left: 2,
+        })
+        .set_margin(Direction {
+            up: 0,
+            down: 0,
+            right: 0,
+            left: 0,
+        });
+
+    let g_color = color_panel.add(g_color);
+
+    let mut label = Label::new("B:".to_string());
+    label
+        .as_panel_control_mut()
+        .set_height(40)
+        .set_width(400)
+        .set_background(0x00999999);
+    label.set_font_color(0xFF000000);
+    label
+        .as_layout_control_mut()
+        .set_padding(Direction {
+            up: 2,
+            down: 2,
+            right: 2,
+            left: 2,
+        })
+        .set_margin(Direction {
+            up: 0,
+            down: 0,
+            right: 0,
+            left: 0,
+        });
+
+    color_panel.add(label);
+
+    let mut b_color = EditLabel::new("85");
+    b_color
+        .as_panel_control_mut()
+        .set_height(40)
+        .set_width(50)
+        .set_background(0xFF000000);
+    b_color
+        .as_label_control_mut()
+        .unwrap()
+        .set_font_color(0xFFFFFFFF)
+        .fit_to_content(false);
+    b_color
+        .as_layout_control_mut()
+        .set_padding(Direction {
+            up: 2,
+            down: 2,
+            right: 2,
+            left: 2,
+        })
+        .set_margin(Direction {
+            up: 0,
+            down: 0,
+            right: 0,
+            left: 0,
+        });
+
+    let b_color = color_panel.add(b_color);
+
+    let mut pallete = Panel::default();
+    pallete
+        .as_panel_control_mut()
+        .set_height(40)
+        .set_width(50)
+        .set_background(0xFF555555);
+    pallete
+        .as_layout_control_mut()
+        .set_padding(Direction {
+            up: 2,
+            down: 2,
+            right: 2,
+            left: 2,
+        })
+        .set_margin(Direction {
+            up: 0,
+            down: 0,
+            right: 0,
+            left: 10,
+        });
+
+    let pallete = color_panel.add(pallete);
+    let pallete_rc_r = Rc::clone(&pallete);
+    let pallete_rc_g = Rc::clone(&pallete);
+    let pallete_rc_b = Rc::clone(&pallete);
+
+    let viewport_1 = Rc::clone(&panel);
+    let viewport_2 = Rc::clone(&panel);
+    let viewport_3 = Rc::clone(&panel);
+
+    r_color
+        .borrow_mut()
+        .as_keyboard_control_mut()
+        .unwrap()
+        .set_on_enter_press(UiCommand::Custom(
+            Cell::new(None),
+            Rc::new(move |sd| {
+                let mut final_color = pallete_rc_r.borrow().as_panel_control().get_background();
+
+                let color = sd
+                    .borrow()
+                    .as_label_control()
+                    .unwrap()
+                    .get_text()
+                    .to_string();
+
+                let a = (final_color >> 24) & 0xFF;
+                let r = (final_color >> 16) & 0xFF;
+                let g = (final_color >> 8) & 0xFF;
+                let b = final_color & 0xFF;
+
+                if let Ok(r) = color.parse::<i32>() {
+                    let r = r.min(255).max(0) as u32;
+                    final_color = (a << 24) | (r << 16) | (g << 8) | b;
+                }
+
+                pallete_rc_r
+                    .borrow_mut()
+                    .as_panel_control_mut()
+                    .set_background(final_color);
+
+                if let Some(viewport) = viewport_1.borrow_mut().as_paintful_mut() {
+                    viewport.change_color_pencil(final_color);
+                }
+            }),
+        ));
+
+    g_color
+        .borrow_mut()
+        .as_keyboard_control_mut()
+        .unwrap()
+        .set_on_enter_press(UiCommand::Custom(
+            Cell::new(None),
+            Rc::new(move |sd| {
+                let mut final_color = pallete_rc_g.borrow().as_panel_control().get_background();
+
+                let color = sd
+                    .borrow()
+                    .as_label_control()
+                    .unwrap()
+                    .get_text()
+                    .to_string();
+
+                let a = (final_color >> 24) & 0xFF;
+                let r = (final_color >> 16) & 0xFF;
+                let g = (final_color >> 8) & 0xFF;
+                let b = final_color & 0xFF;
+
+                if let Ok(g) = color.parse::<i32>() {
+                    let g = g.min(255).max(0) as u32;
+                    final_color = (a << 24) | (r << 16) | (g << 8) | b;
+                }
+
+                pallete_rc_g
+                    .borrow_mut()
+                    .as_panel_control_mut()
+                    .set_background(final_color);
+
+                if let Some(viewport) = viewport_2.borrow_mut().as_paintful_mut() {
+                    viewport.change_color_pencil(final_color);
+                }
+            }),
+        ));
+
+    b_color
+        .borrow_mut()
+        .as_keyboard_control_mut()
+        .unwrap()
+        .set_on_enter_press(UiCommand::Custom(
+            Cell::new(None),
+            Rc::new(move |sd| {
+                let mut final_color = pallete_rc_b.borrow().as_panel_control().get_background();
+
+                let color = sd
+                    .borrow()
+                    .as_label_control()
+                    .unwrap()
+                    .get_text()
+                    .to_string();
+
+                let a = (final_color >> 24) & 0xFF;
+                let r = (final_color >> 16) & 0xFF;
+                let g = (final_color >> 8) & 0xFF;
+                let b = final_color & 0xFF;
+
+                if let Ok(b) = color.parse::<i32>() {
+                    let b = b.min(255).max(0) as u32;
+                    final_color = (a << 24) | (r << 16) | (g << 8) | b;
+                }
+
+                pallete_rc_b
+                    .borrow_mut()
+                    .as_panel_control_mut()
+                    .set_background(final_color);
+
+                if let Some(viewport) = viewport_3.borrow_mut().as_paintful_mut() {
+                    viewport.change_color_pencil(final_color);
+                }
+            }),
+        ));
+
+    app.add(color_panel);
 
     app.run();
-
-    print!("lol");
 }
 
+#[cfg(not(target_os = "android"))]
 fn main() {
     //main_1();
     main_2();

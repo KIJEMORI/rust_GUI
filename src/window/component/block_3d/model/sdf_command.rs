@@ -15,7 +15,7 @@ pub struct SDFCommandRaw {
     pub rotation: [f32; 3], // 12 байт
     pub params: [f32; 4],   // 16 байт (выровнено по 16)
     pub color: u32,         // 4 байта
-    pub _padding: u32,      // 4 байта
+    pub type_union: u32,    // 4 байта
                             // 48 байт в сумме на комманду
 }
 
@@ -25,6 +25,7 @@ pub struct SDFCommandExt {
     pub params: [f32; 4],
     pub color: u32,
     pub material_id: u32,
+    pub type_union: f32,
 }
 pub trait SDFTrait {
     fn get_transform(&self) -> &Transform;

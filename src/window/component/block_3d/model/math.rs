@@ -1,7 +1,8 @@
 use glam::{Mat4, Vec2, Vec3};
 
-use crate::window::component::block_3d::model::sdf_command::{
-    SDFCommandExt, sd_box, sd_capsule, sd_cylinder, sd_sphere, smin,
+use crate::window::component::block_3d::{
+    model::sdf_command::{SDFCommandExt, sd_box, sd_capsule, sd_cylinder, sd_sphere, smin},
+    type_union,
 };
 
 fn map_world_sdf(world_p: Vec3, history: &[SDFCommandExt]) -> f32 {
@@ -34,10 +35,20 @@ fn map_world_sdf(world_p: Vec3, history: &[SDFCommandExt]) -> f32 {
 
         d *= uniform_scale;
 
+        let type_union = cmd.type_union;
+
         if i == 0 {
             res = d;
         } else {
-            res = smin(res, d, k);
+            if type_union < 0.5 {
+                res = res.min(d);
+            } else if type_union < 1.5 {
+                res = res.max(d);
+            } else if type_union < 2.5 {
+                res = res.max(-d);
+            } else if type_union < 3.5 {
+                res = smin(res, d, k);
+            }
         }
     }
     res
